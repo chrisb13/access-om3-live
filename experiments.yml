@@ -7,6 +7,7 @@ experiments:
   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
   - /g/data/ol01/outputs/access-om3-8km/MC_8km_jra_ryf-test2-expt-c349f800
   - /g/data/ol01/outputs/access-om3-100km/MC_100km_jra_iaf+wombatlite-test1-e1de2a94
+  - /scratch/tm70/ek4684/test1/archive
 
 # Notebooks run for every experiment, from this access-om3-paper-1 git ref.
 # (pull/137/head until PR #137, which adds ocean_stats, is merged; then main.)
