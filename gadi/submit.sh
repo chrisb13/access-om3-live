@@ -47,8 +47,10 @@ done
 # Rebuild the site if anything runs, the experiment list changed, or the Evaluation Summary changed.
 echo "$SUMMARY_SHA ${EXPERIMENTS[*]}" > "$STATE/published.pending"
 if [ -s "$WORK/run_list" ]; then
-    echo "jobid=$(qsub -P "$PROJECT" -l storage="$STORAGE" -o "$WORK/logs" -e "$WORK/logs" \
-                       -v WORK="$WORK" "$WORK/gadi/mkfigs_live.sh")"
+    echo "qsub -P $PROJECT -l storage=$STORAGE" >&2
+    jobid=$(qsub -P "$PROJECT" -l storage="$STORAGE" -o "$WORK/logs" -e "$WORK/logs" \
+                 -v WORK="$WORK" "$WORK/gadi/mkfigs_live.sh")   # a failed qsub now stops the run, with its error
+    echo "jobid=$jobid"
     echo "rebuild=true"
 elif ! cmp -s "$STATE/published.pending" "$STATE/published"; then
     echo "rebuild=true"
