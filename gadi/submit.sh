@@ -3,6 +3,9 @@
 # Usage: submit.sh WORK_DIR SUMMARY_SHA FORCE   (prints key=value lines for $GITHUB_OUTPUT)
 set -euo pipefail
 WORK=$1 SUMMARY_SHA=$2 FORCE=$3
+# Non-interactive SSH gets PATH=/bin:/usr/bin; load the Gadi login environment for qsub/qselect.
+if ! command -v qsub >/dev/null; then set +eu; source /etc/profile >/dev/null 2>&1; set -eu; fi
+command -v qsub >/dev/null || { echo "qsub not found on PATH ($PATH)" >&2; exit 1; }
 source "$WORK/config.sh"   # EXPERIMENTS, NOTEBOOKS, PAPER_REF, PROJECT, STORAGE, CONDA_MODULE
 STATE="$WORK/state" PAPER="$WORK/access-om3-paper-1"
 mkdir -p "$STATE" "$WORK/logs"
