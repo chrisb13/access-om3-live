@@ -19,6 +19,14 @@ git -C "$PAPER" fetch -q origin "$PAPER_REF"
 git -C "$PAPER" checkout -q --detach FETCH_HEAD
 git -C "$PAPER" submodule -q update --init --recursive
 
+# The PBS job must be able to see each folder it reads: add its /g/data or /scratch project to STORAGE.
+add_storage() {
+    local s
+    case $1 in /g/data/*) s=gdata/$(cut -d/ -f4 <<< "$1");; /scratch/*) s=scratch/$(cut -d/ -f3 <<< "$1");; *) return 0;; esac
+    if [[ "+$STORAGE+" != *"+$s+"* ]]; then STORAGE+="+$s"; fi
+}
+add_storage "$(readlink -f "$WORK")"   # config.sh, the paper checkout and outputs live here
+
 # Re-run an experiment if it has new .nc output, or the notebooks (commit or list) changed.
 key="$(git -C "$PAPER" rev-parse HEAD) ${NOTEBOOKS[*]}"
 : > "$WORK/run_list"
@@ -27,9 +35,7 @@ for path in "${EXPERIMENTS[@]}"; do
     if [ "$e" = archive ]; then echo "$path: give the folder that 'archive' links to, not the link" >&2; continue; fi
     out=$(readlink -f "$path") || true
     if [ ! -d "$out" ]; then echo "no output directory found at $path" >&2; continue; fi
-    # Let the PBS job read it: add the folder's /g/data or /scratch project to the storage line.
-    case $out in /g/data/*) s=gdata/$(cut -d/ -f4 <<< "$out");; /scratch/*) s=scratch/$(cut -d/ -f3 <<< "$out");; *) s=;; esac
-    if [ -n "$s" ] && [[ "+$STORAGE+" != *"+$s+"* ]]; then STORAGE+="+$s"; fi
+    add_storage "$out"
     stamp="$STATE/$e.stamp"
     if [ "$FORCE" = true ] || [ ! -e "$stamp" ] || [ "$(cat "$stamp")" != "$key" ] \
        || [ -n "$(find "$out" -name '*.nc' -newer "$stamp" -print -quit)" ]; then

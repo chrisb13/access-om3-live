@@ -85,6 +85,12 @@ jobs:
         if: steps.submit.outputs.jobid != ''
         run: until ssh "$GADI" qstat -xf "${{ steps.submit.outputs.jobid }}" | grep -q 'job_state = F'; do sleep 300; done
 
+      - name: Show PBS job log
+        if: steps.submit.outputs.jobid != ''
+        env:
+          JOBID: ${{ steps.submit.outputs.jobid }}
+        run: ssh "$GADI" "tail -n 40 $WORK/logs/mkfigs_live.e${JOBID%%.*}" || true   # PBS names it <jobname>.e<number>
+
       - name: Collect outputs and build site
         if: steps.submit.outputs.rebuild == 'true'
         run: |
