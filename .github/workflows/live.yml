@@ -1,0 +1,120 @@
+name: Live evaluation site
+
+on:
+  schedule:
+    - cron: '0 14 * * *'   # midnight AEST
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Re-run notebooks for every experiment, even without new output'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: live-site
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      GADI: ${{ secrets.GADI_USER }}@gadi.nci.org.au
+      WORK: ${{ secrets.GADI_WORK_DIR }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: pip install -r requirements.txt
+
+      # Copied from ACCESS-NRI/COSIMA-recipes-workflow (cosima-all-recipes.yml).
+      - name: Configure SSH for Gadi
+        env:
+          GADI_KEY: ${{ secrets.GADI_KEY }}
+          GADI_KEY_PASSPHRASE: ${{ secrets.GADI_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "${{ secrets.GADI_USER }}" || { echo "GADI_USER secret is not configured" >&2; exit 2; }
+          test -n "$GADI_KEY" || { echo "GADI_KEY secret is not configured" >&2; exit 2; }
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$GADI_KEY" > ~/.ssh/gadi_key
+          chmod 600 ~/.ssh/gadi_key
+          ssh-keyscan -H gadi.nci.org.au >> ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          if [[ -n "${GADI_KEY_PASSPHRASE:-}" ]]; then
+            ASKPASS=$(mktemp)
+            chmod 700 "$ASKPASS"
+            printf '#!/usr/bin/env bash\nprintf %%s "$GADI_KEY_PASSPHRASE"\n' > "$ASKPASS"
+            DISPLAY=:0 SSH_ASKPASS="$ASKPASS" SSH_ASKPASS_REQUIRE=force ssh-add ~/.ssh/gadi_key </dev/null
+            rm -f "$ASKPASS"
+          else
+            ssh-add ~/.ssh/gadi_key
+          fi
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+
+      - name: Fetch Evaluation Summary source (access-om3-configs Experiments.md)
+        run: curl -fsSL -o Experiments.md https://raw.githubusercontent.com/ACCESS-NRI/access-om3-configs/main/documentation/docs/pages/Experiments.md
+
+      - name: Submit notebooks for experiments with new output
+        id: submit
+        env:
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          set -euo pipefail
+          python3 -c 'import shlex, yaml
+          for k, v in yaml.safe_load(open("experiments.yml")).items():
+              print(f"{k.upper()}=" + ("(" + " ".join(map(shlex.quote, v)) + ")" if isinstance(v, list) else shlex.quote(str(v))))' > config.sh
+          ssh "$GADI" mkdir -p "$WORK"
+          rsync -r gadi config.sh "$GADI:$WORK/"
+          ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-64)" "$FORCE" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Wait for PBS job
+        if: steps.submit.outputs.jobid != ''
+        run: until ssh "$GADI" qstat -xf "${{ steps.submit.outputs.jobid }}" | grep -q 'job_state = F'; do sleep 300; done
+
+      - name: Collect outputs and build site
+        if: steps.submit.outputs.rebuild == 'true'
+        run: |
+          set -euo pipefail
+          source config.sh
+          mkdir -p content
+          for e in "${EXPERIMENTS[@]}"; do
+            e=$(basename "$e")   # ENAME = name of the archive folder
+            rsync -a --include='mkmd/***' --include='*_rendered.ipynb' --exclude='*' \
+              "$GADI:$WORK/access-om3-paper-1/notebooks/mkfigs_output_$e/" "content/$e/" \
+              || echo "::warning::no outputs yet for $e"
+          done
+          # Theme files from access-om3-paper-1, so the look stays in step with the paper site.
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ACCESS-Community-Hub/access-om3-paper-1.git theme
+          git -C theme sparse-checkout set documentation/overrides documentation/docs/assets documentation/docs/css documentation/docs/fontello
+          python3 scripts/build_site.py Experiments.md
+          mkdocs build -f build/mkdocs.yml -d site
+
+      - if: steps.submit.outputs.rebuild == 'true'
+        uses: actions/configure-pages@v6
+
+      - if: steps.submit.outputs.rebuild == 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/site
+
+      - if: steps.submit.outputs.rebuild == 'true'
+        id: deploy
+        uses: actions/deploy-pages@v5
+
+      - name: Record what is now published
+        if: steps.submit.outputs.rebuild == 'true'
+        run: ssh "$GADI" mv "$WORK/state/published.pending" "$WORK/state/published"

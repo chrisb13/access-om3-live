@@ -1,0 +1,22 @@
+# Experiments shown under "Live" on the website.
+# Add or remove a run to bring it in or out of focus. Give the full path to the
+# run's archive folder (the one holding output000, output001, ...), either the
+# payu archive on /scratch or the synced copy on /g/data. Its folder name is used
+# as the experiment name on the site, so names must be unique.
+experiments:
+  - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
+  - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test3v2-00532b88
+
+# Notebooks run for every experiment, from this access-om3-paper-1 git ref.
+# (pull/137/head until PR #137, which adds ocean_stats, is merged; then main.)
+paper_ref: pull/137/head
+notebooks:
+  - ocean_stats
+  - timeseries
+  - Timeseries_daily_extreme_from_2D_fields
+
+# PBS settings for the nightly job.
+project: tm70
+# Only what the job always needs; each run's own /g/data or /scratch project is added automatically.
+storage: gdata/xp65
+conda_module: conda/analysis3-26.08
