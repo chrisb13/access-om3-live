@@ -30,25 +30,30 @@ add_storage() {
 }
 add_storage "$(readlink -f "$WORK")"   # config.sh, the paper checkout and outputs live here
 
-# Re-run an experiment if it has new .nc output, or the notebooks (commit or list) changed.
-key="$(git -C "$PAPER" rev-parse HEAD) ${NOTEBOOKS[*]}"
+# Re-run an experiment if it has new .nc output, or its notebooks (commit or list) changed.
+commit=$(git -C "$PAPER" rev-parse HEAD)
 : > "$WORK/run_list"
-for path in "${EXPERIMENTS[@]}"; do
+rm -rf "$WORK/status" && mkdir -p "$WORK/status"   # one run_status.py snapshot per experiment
+for i in "${!EXPERIMENTS[@]}"; do
+    path=${EXPERIMENTS[$i]} run_dir=${RUN_DIRS[$i]:-}   # run_dir: optional payu control directory (status page only)
+    extra=${EXTRA_NOTEBOOKS[$i]:-}                        # optional notebooks for this experiment only
+    key="$commit ${NOTEBOOKS[*]} $extra"
     e=$(basename "$path")   # ENAME = name of the archive folder
     if [ "$e" = archive ]; then echo "$path: give the folder that 'archive' links to, not the link" >&2; continue; fi
     out=$(readlink -f "$path") || true
     if [ ! -d "$out" ]; then echo "no output directory found at $path" >&2; continue; fi
     add_storage "$out"
+    python3 "$WORK/gadi/run_status.py" "$out" "$WORK/status/$e.json" ${run_dir:+"$run_dir"} || echo "could not read run status for $e" >&2
     stamp="$STATE/$e.stamp"
     if [ "$FORCE" = true ] || [ ! -e "$stamp" ] || [ "$(cat "$stamp")" != "$key" ] \
        || [ -n "$(find "$out" -name '*.nc' -newer "$stamp" -print -quit)" ]; then
-        echo "$e=$out" >> "$WORK/run_list"
+        echo "$e=$out=$extra" >> "$WORK/run_list"
         echo "$key" > "$STATE/$e.pending"   # becomes $e.stamp when the job finishes
     fi
 done
 
-# Rebuild the site if anything runs, the experiment list changed, or the Evaluation Summary changed.
-echo "$SUMMARY_SHA ${EXPERIMENTS[*]}" > "$STATE/published.pending"
+# Rebuild the site if anything runs, or the experiment list, any run's status or the Evaluation Summary changed.
+echo "$SUMMARY_SHA ${EXPERIMENTS[*]} $(cat "$WORK"/status/*.json 2>/dev/null | md5sum)" > "$STATE/published.pending"
 if [ -s "$WORK/run_list" ]; then
     echo "qsub -P $PROJECT -l storage=$STORAGE" >&2
     jobid=$(qsub -P "$PROJECT" -l storage="$STORAGE" -o "$WORK/logs" -e "$WORK/logs" \

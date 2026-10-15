@@ -75,7 +75,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 -c 'import shlex, yaml
-          for k, v in yaml.safe_load(open("experiments.yml")).items():
+          c = yaml.safe_load(open("experiments.yml"))
+          ex = [x if isinstance(x, dict) else {"archive": x} for x in c.pop("experiments")]
+          c["experiments"], c["run_dirs"] = [x["archive"] for x in ex], [x.get("run_dir", "") for x in ex]
+          c["extra_notebooks"] = [" ".join(x.get("notebooks", [])) for x in ex]
+          for k, v in c.items():
               print(f"{k.upper()}=" + ("(" + " ".join(map(shlex.quote, v)) + ")" if isinstance(v, list) else shlex.quote(str(v))))' > config.sh
           ssh "$GADI" mkdir -p "$WORK"
           rsync -r gadi config.sh "$GADI:$WORK/"
@@ -102,10 +106,11 @@ jobs:
           mkdir -p content
           for e in "${EXPERIMENTS[@]}"; do
             e=$(basename "$e")   # ENAME = name of the archive folder
-            rsync -a --include='mkmd/***' --include='*_rendered.ipynb' --exclude='*' \
+            rsync -a --include='mkmd/***' --include='*_rendered.ipynb' --include='sypd.png' --exclude='*' \
               "$GADI:$WORK/access-om3-paper-1/notebooks/mkfigs_output_$e/" "content/$e/" \
               || echo "::warning::no outputs yet for $e"
           done
+          rsync -a "$GADI:$WORK/status/" status/ || echo "::warning::no run status snapshots"
           # Theme files from access-om3-paper-1, so the look stays in step with the paper site.
           git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ACCESS-Community-Hub/access-om3-paper-1.git theme
           git -C theme sparse-checkout set documentation/overrides documentation/docs/assets documentation/docs/css documentation/docs/fontello

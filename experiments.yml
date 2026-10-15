@@ -1,8 +1,15 @@
-# Experiments shown under "Live" on the website.
-# Add or remove a run to bring it in or out of focus. Give the full path to the
-# run's archive folder (the one holding output000, output001, ...), either the
-# payu archive on /scratch or the synced copy on /g/data. Its folder name is used
-# as the experiment name on the site, so names must be unique.
+# Experiments shown under "OM3 Monitor" on the website. Add or remove an entry to bring a
+# run in or out of focus. The keys match the sections of each experiment's status page:
+#   archive    (required) full path to the run's archive folder (holding output000, ...): the
+#              payu archive on /scratch or its synced copy on /g/data. Its folder name is the
+#              experiment's name on the site, so it must be unique.
+#   run_dir    (optional) the payu control directory, for the current or crashed run's logs.
+#   notebooks  (optional) extra notebooks for this experiment, on top of `notebooks` below.
+# An entry with just the archive folder can be written as a plain path:
+#   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
+#   - archive: /g/data/ol01/outputs/access-om3-8km/MC_8km_jra_ryf-test2-expt-c349f800
+#     run_dir: /g/data/tm70/cyb561/access-om3-runs/8k/MC_8km_jra_ryf-test2
+#     notebooks: [MLD, SST]
 experiments:
   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
   - /g/data/ol01/outputs/access-om3-8km/MC_8km_jra_ryf-test2-expt-c349f800
@@ -19,6 +26,8 @@ notebooks:
 
 # PBS settings for the nightly job.
 project: tm70
-# Only what the job always needs; each run's own /g/data or /scratch project is added automatically.
-storage: gdata/xp65
+# What the notebooks always need: xp65 (conda environment) and ik11 (the ACCESS-OM2 run
+# that timeseries compares against). Each run's own /g/data or /scratch project is added
+# automatically; add any project that extra notebooks read from.
+storage: gdata/xp65+gdata/ik11
 conda_module: conda/analysis3-26.08

@@ -18,10 +18,11 @@ module load "$CONDA_MODULE"
 
 PAPER="$WORK/access-om3-paper-1"
 export PYTHONPATH="$PAPER/external/access-model-mkfigs/src:${PYTHONPATH:-}"
-printf -v MKFIGS_NOTEBOOKS '%s:' "${NOTEBOOKS[@]}"
-export MKFIGS_NOTEBOOKS="${MKFIGS_NOTEBOOKS%:}"
-
-while IFS='=' read -r ENAME OUTDIR; do
+while IFS='=' read -r ENAME OUTDIR EXTRA; do
+    # The standard notebooks plus this experiment's own (EXTRA: space-separated, may be empty)
+    read -r -a extra <<< "$EXTRA"
+    printf -v MKFIGS_NOTEBOOKS '%s:' "${NOTEBOOKS[@]}" "${extra[@]}"
+    export MKFIGS_NOTEBOOKS="${MKFIGS_NOTEBOOKS%:}"
     # Temporary datastore in jobfs. Its folder must be named ENAME: mkfigs takes the
     # experiment name from the datastore's parent folder.
     CAT="$PBS_JOBFS/$ENAME"
@@ -30,5 +31,11 @@ while IFS='=' read -r ENAME OUTDIR; do
 
     rm -rf "$PAPER/notebooks/mkfigs_output_$ENAME"   # site shows only this run's output
     python3 -m mkfigs.run --ename "$ENAME" --esmdir "$CAT/datastore.json" --wfolder "$PAPER/"
+    # Model throughput of the completed submissions in the archive folder, once the paper repo
+    # has plot_sypd.py (access-om3-paper-1 PR #145).
+    if [ -f "$PAPER/notebooks/plot_sypd.py" ]; then
+        python3 "$PAPER/notebooks/plot_sypd.py" "$OUTDIR" --title "$ENAME" \
+            -o "$PAPER/notebooks/mkfigs_output_$ENAME/sypd.png"
+    fi
     mv "$WORK/state/$ENAME.pending" "$WORK/state/$ENAME.stamp"
 done < "$WORK/run_list"

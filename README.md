@@ -21,6 +21,7 @@ the folder's project is added to the PBS storage flags automatically.
 | `.github/workflows/live.yml` | Nightly (or manual) job: submit on Gadi, wait, copy outputs back, build and publish the site |
 | `gadi/submit.sh` | On a Gadi login node: update the paper repo, pick runs with new `.nc` output, `qsub` the job |
 | `gadi/mkfigs_live.sh` | The PBS job: builds a temporary datastore per run, then runs `mkfigs.run` (as `mkfigs.sh` does) |
+| `gadi/run_status.py` | On the login node: snapshot each run's payu records (job history, latest log tails) for its status page |
 | `scripts/build_site.py` | Lays out the pages and menu; the theme files come from access-om3-paper-1 |
 | `mkdocs.yml` | Website settings, copied from access-om3-paper-1 |
 
