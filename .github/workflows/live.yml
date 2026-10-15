@@ -83,7 +83,10 @@ jobs:
 
       - name: Wait for PBS job
         if: steps.submit.outputs.jobid != ''
-        run: until ssh "$GADI" qstat -xf "${{ steps.submit.outputs.jobid }}" | grep -q 'job_state = F'; do sleep 300; done
+        env:
+          JOBID: ${{ steps.submit.outputs.jobid }}
+        # /etc/profile puts qstat on PATH (non-interactive SSH only gets /bin:/usr/bin)
+        run: until ssh "$GADI" "source /etc/profile >/dev/null 2>&1; qstat -xf $JOBID" | grep -q 'job_state = F'; do sleep 300; done
 
       - name: Show PBS job log
         if: steps.submit.outputs.jobid != ''
