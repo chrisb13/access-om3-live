@@ -79,7 +79,7 @@ jobs:
               print(f"{k.upper()}=" + ("(" + " ".join(map(shlex.quote, v)) + ")" if isinstance(v, list) else shlex.quote(str(v))))' > config.sh
           ssh "$GADI" mkdir -p "$WORK"
           rsync -r gadi config.sh "$GADI:$WORK/"
-          ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-64)" "$FORCE" | tee -a "$GITHUB_OUTPUT"
+          ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA" "$FORCE" | tee -a "$GITHUB_OUTPUT"
 
       - name: Wait for PBS job
         if: steps.submit.outputs.jobid != ''
@@ -92,7 +92,7 @@ jobs:
         if: steps.submit.outputs.jobid != ''
         env:
           JOBID: ${{ steps.submit.outputs.jobid }}
-        run: ssh "$GADI" "tail -n 40 $WORK/logs/mkfigs_live.e${JOBID%%.*}" || true   # PBS names it <jobname>.e<number>
+        run: ssh "$GADI" "tail -n 40 $WORK/logs/$JOBID.ER" || true   # Gadi names it <jobid>.ER when -e is a folder
 
       - name: Collect outputs and build site
         if: steps.submit.outputs.rebuild == 'true'

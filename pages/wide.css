@@ -1,0 +1,4 @@
+/* Use the full window width, so wide tables fit (same rule as the access-om3-configs documentation). */
+.md-grid {
+  max-width: 100%;
+}
