@@ -75,3 +75,7 @@ extra_css:
   - fontello/css/fontello.css
   - css/custom.css
   - css/wide.css   # from pages/wide.css
+  - css/mom_input_diff.css   # from pages/
+
+extra_javascript:
+  - js/mom_input_diff.js   # from pages/

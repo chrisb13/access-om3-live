@@ -10,6 +10,8 @@ import json
 
 import yaml
 
+import mom_input_data
+
 ROOT = Path(__file__).resolve().parent.parent
 CONTENT, THEME, BUILD, STATUS = ROOT / "content", ROOT / "theme" / "documentation", ROOT / "build", ROOT / "status"
 CONFIGS_SITE = "https://access-om3-configs.access-hive.org.au/latest/"
@@ -112,6 +114,12 @@ def main(summary_md: str) -> None:
     shutil.copytree(THEME / "docs", docs, ignore=shutil.ignore_patterns("pages"))
     shutil.copytree(THEME / "overrides", BUILD / "overrides")
     shutil.copy2(ROOT / "pages" / "wide.css", docs / "css")
+    # MOM_input diff page: data comes from the branch tips listed in the Experiments table.
+    (docs / "js").mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "pages" / "mom_input_diff.css", docs / "css")
+    shutil.copy2(ROOT / "pages" / "mom_input_diff.js", docs / "js")
+    shutil.copy2(ROOT / "pages" / "mom-input-diff.md", docs)
+    mom_input_data.build(Path(summary_md).read_text(), docs / "assets" / "mom_input")
 
     home = (ROOT / "pages" / "home.md").read_text()
     (docs / "index.md").write_text(home.replace("{repo}", REPO).replace("{notebooks}", ", ".join(cfg["notebooks"])))
@@ -172,7 +180,8 @@ def main(summary_md: str) -> None:
         "| Experiment | Latest submission, model date reached | Notebooks last run | Notebooks shown | Failed |\n|---|---|---|---|---|\n"
         + "\n".join(rows) + "\n")
 
-    nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Evaluation Summary": "evaluation-summary.md"}]
+    nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Evaluation Summary": "evaluation-summary.md"},
+           {"MOM_input diff": "mom-input-diff.md"}]
     (BUILD / "mkdocs.yml").write_text(yaml.safe_dump({"INHERIT": "../mkdocs.yml", "nav": nav}, sort_keys=False))
 
 

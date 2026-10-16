@@ -23,6 +23,7 @@ the folder's project is added to the PBS storage flags automatically.
 | `gadi/mkfigs_live.sh` | The PBS job: builds a temporary datastore per run, then runs `mkfigs.run` (as `mkfigs.sh` does) |
 | `gadi/run_status.py` | On the login node: snapshot each run's payu records (job history, latest log tails) for its status page |
 | `scripts/build_site.py` | Lays out the pages and menu; the theme files come from access-om3-paper-1 |
+| `scripts/mom_input_data.py`, `pages/mom_input_diff.*` | The **MOM_input diff** page: reads `MOM_input` (and `MOM_override`) from the tip of each [access-om3-experiments](https://github.com/ACCESS-Community-Hub/access-om3-experiments) branch listed in the Experiments table, and compares any two in the browser |
 | `mkdocs.yml` | Website settings, copied from access-om3-paper-1 |
 
 A run is skipped when it has no new `.nc` files since its last run and the notebooks have not
