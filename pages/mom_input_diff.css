@@ -1,0 +1,16 @@
+#mom-diff .bar { display: flex; flex-wrap: wrap; gap: .8rem 1.2rem; align-items: end; margin-bottom: 1rem; }
+#mom-diff label { display: block; font-size: .65rem; text-transform: uppercase; opacity: .7; }
+#mom-diff select, #mom-diff input[type=text], #mom-diff button {
+  font: inherit; font-size: .75rem; padding: .35rem .5rem; color: inherit;
+  background: var(--md-default-bg-color); border: 1px solid var(--md-default-fg-color--lighter); border-radius: 3px; }
+#mom-diff select { min-width: 22rem; max-width: 100%; }
+#mom-diff .a select { border-left: 4px solid #2b8cbe; }
+#mom-diff .b select { border-left: 4px solid #d95f0e; }
+#mom-diff table { width: 100%; font-size: .72rem; display: table; }
+#mom-diff th.a { color: #2b8cbe; } #mom-diff th.b { color: #d95f0e; }
+#mom-diff td.a { background: rgba(43, 140, 190, .13); } #mom-diff td.b { background: rgba(217, 95, 14, .13); }
+#mom-diff td, #mom-diff th { font-family: var(--md-code-font-family); overflow-wrap: anywhere; }
+#mom-diff tr.mod td { opacity: .65; padding-top: 1rem; }
+#mom-diff td.unset { font-style: italic; opacity: .6; }
+#mom-diff a { color: inherit; }
+#mom-diff .refs, #mom-diff .count { font-size: .7rem; opacity: .75; margin: .3rem 0; }
