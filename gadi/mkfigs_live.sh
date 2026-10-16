@@ -2,15 +2,17 @@
 #PBS -N mkfigs_live
 #PBS -q normal
 #PBS -l ncpus=16
-#PBS -l mem=120GB
+#PBS -l mem=190GB
 #PBS -l jobfs=1GB
-#PBS -l walltime=04:00:00
-# Sized from a 5-experiment run (Oct 2026): 79 GB peak memory, 83 MB jobfs, 1 h 12 min, 30% CPU use.
-# Gadi charges max(ncpus, mem/4GB) per hour, so memory sets the cost: 120 GB is charged as 30 CPUs.
+#PBS -l walltime=24:00:00
+# One job per experiment. A 4-hour job with 120 GB ran out of walltime on its second experiment
+# (Oct 2026), using 105 GB with the dask workers pausing at their memory limit; long and 8 km
+# runs need much longer. SUs are only charged for the time actually used.
 #PBS -W umask=0022
 
-# Nightly version of access-om3-paper-1/notebooks/mkfigs.sh: runs NOTEBOOKS for each
-# experiment in $WORK/run_list (written by submit.sh), against a freshly built datastore.
+# Nightly version of access-om3-paper-1/notebooks/mkfigs.sh: runs NOTEBOOKS for the experiment
+# in $RUN_LIST (written by submit.sh), against a freshly built datastore, then copies the results
+# to $WORK/results/<ENAME>/ for the site. A job killed part-way leaves the previous results there.
 set -x
 source "$WORK/config.sh"
 command -v module >/dev/null || source /etc/profile   # as in COSIMA-recipes-workflow
@@ -31,13 +33,15 @@ while IFS='=' read -r ENAME OUTDIR EXTRA; do
     mkdir -p "$CAT"
     build-esm-datastore --builder AccessOm3Builder --expt-dir "$OUTDIR" --cat-dir "$CAT" --datastore-name datastore
 
-    rm -rf "$PAPER/notebooks/mkfigs_output_$ENAME"   # site shows only this run's output
-    python3 -m mkfigs.run --ename "$ENAME" --esmdir "$CAT/datastore.json" --wfolder "$PAPER/"
-    # Model throughput of the completed submissions in the archive folder, once the paper repo
-    # has plot_sypd.py (access-om3-paper-1 PR #145).
+    OUT="$PAPER/notebooks/mkfigs_output_$ENAME" RESULTS="$WORK/results/$ENAME"
+    rm -rf "$OUT" && mkdir -p "$OUT" "$RESULTS"   # this run's output only
+    # Model throughput of the completed submissions (access-om3-paper-1's plot_sypd.py, PR #145):
+    # first, and straight to the results, so it is updated even if a notebook later fails.
     if [ -f "$PAPER/notebooks/plot_sypd.py" ]; then
-        python3 "$PAPER/notebooks/plot_sypd.py" "$OUTDIR" --title "$ENAME" \
-            -o "$PAPER/notebooks/mkfigs_output_$ENAME/sypd.png"
+        python3 "$PAPER/notebooks/plot_sypd.py" "$OUTDIR" --title "$ENAME" -o "$OUT/sypd.png" \
+            && cp "$OUT/sypd.png" "$RESULTS/"
     fi
+    python3 -m mkfigs.run --ename "$ENAME" --esmdir "$CAT/datastore.json" --wfolder "$PAPER/"
+    rsync -a --delete "$OUT/" "$RESULTS/"   # publish this run's results as a whole
     mv "$WORK/state/$ENAME.pending" "$WORK/state/$ENAME.stamp"
-done < "$WORK/run_list"
+done < "${RUN_LIST:-$WORK/run_list}"

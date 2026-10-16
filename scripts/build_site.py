@@ -98,17 +98,18 @@ def _logs(logs: dict) -> list:
     return md
 
 
-def description(entry, st: dict) -> str:
-    """The experiment's description: from experiments.yml, else the first line of its metadata.yaml description."""
+def description(entry, st: dict) -> tuple:
+    """(description, True if it came from metadata.yaml): from experiments.yml, else the first line of
+    the description in the run's metadata.yaml."""
     if isinstance(entry, dict) and entry.get("description"):
-        return " ".join(str(entry["description"]).split())
+        return " ".join(str(entry["description"]).split()), False
     try:
         meta = yaml.safe_load(st.get("metadata") or "")
         text = str((meta if isinstance(meta, dict) else {}).get("description") or "")
     except yaml.YAMLError:
         text = ""
     first = text.strip().splitlines()[0] if text.strip() else ""
-    return first if len(first) <= 200 else first[:197] + "…"
+    return (first if len(first) <= 200 else first[:197] + "…"), bool(first)
 
 
 def failures(errors_log: Path) -> dict:
@@ -239,7 +240,7 @@ def truncation_section(st: dict, work: bool = False) -> list:
 def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     """Markdown for an experiment's run-status page, from gadi/run_status.py's snapshot."""
     if st.get("no_snapshot"):  # nothing was read from Gadi: say so, rather than showing zeros
-        return "\n".join([f"# {e}\n"] + ([f"*{st['description']}*\n"] if st.get("description") else []) + [
+        return "\n".join([f"# {e}\n"] + ([f"{st['description']}\n"] if st.get("description") else []) + [
             "⚠️ **No status snapshot for this experiment.** The nightly job couldn't read this run's records on "
             f"Gadi this time (archive folder `{st['no_snapshot']}`), so its run status, logs, configuration and "
             "truncation sections are missing. They will appear after the next nightly run that reads them; if "
@@ -248,7 +249,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     runs, archive, run_dir = st.get("runs", []), st.get("archive", "?"), st.get("run_dir")
     done = [r for r in runs if r.get("model_finish")]
     emoji, sentence = health(st)
-    md = [f"# {e}\n"] + ([f"*{st['description']}*\n"] if st.get("description") else []) + [
+    md = [f"# {e}\n"] + ([f"{st['description']}\n"] if st.get("description") else []) + [
           f"{emoji} **Latest submission:** {sentence}\n",
           f"**Notebooks:** {nb_links or 'none yet'}\n"]
     if run_dir:
@@ -307,6 +308,12 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
     failed = failures(errors)
     ran = (datetime.fromtimestamp(log.stat().st_mtime, timezone.utc).astimezone(ZoneInfo("Australia/Canberra"))
            .strftime("%Y-%m-%d %H:%M %Z") if log.exists() else "not run yet")
+    job = _snapshot(STATUS / f"{e}.job.json")  # written by submit.sh
+    job_note = (f"🏃 Notebooks are being re-run now (PBS job {job['running']}); results below are from the "
+                "previous complete run." if job.get("running") else
+                f"⏱ The last notebook job ({job['unfinished']}) didn't finish (out of walltime or memory, or "
+                "deleted); results below are from the previous complete run." if job.get("unfinished") else "")
+    ran += {"🏃": "<br>🏃 re-running now", "⏱": "<br>⏱ last job didn't finish"}.get(job_note[:1], "")
     for nb in notebooks:
         md, ipynb = src / "mkmd" / f"{nb}.md", src / f"{nb}_rendered.ipynb"
         if not ((md.exists() and ipynb.exists()) or nb in failed):
@@ -338,11 +345,14 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
     st = _snapshot(STATUS / f"{e}.json")
     if not st:
         st["no_snapshot"] = entry["archive"] if isinstance(entry, dict) else entry  # as listed in experiments.yml
-    st["description"] = description(entry, st)
+    st["description"], from_metadata = description(entry, st)
+    if from_metadata:  # say so, so it isn't mistaken for a description written for this site
+        st["description"] += " *(from the run's metadata.yaml)*"
     (docs / "live" / e).mkdir(parents=True, exist_ok=True)
     if (src / "sypd.png").exists():
         shutil.copy2(src / "sypd.png", docs / "live" / e)
-    (docs / "live" / e / "index.md").write_text(status_page(e, st, links, (src / "sypd.png").exists()))
+    (docs / "live" / e / "index.md").write_text(status_page(e, st, links + (f"\n\n{job_note}" if job_note else ""),
+                                                            (src / "sypd.png").exists()))
     done = [r for r in st.get("runs", []) if r.get("model_finish")]
     reached = ("⚠️ no status snapshot" if st.get("no_snapshot") else
                f"{health(st)[0]} {_date(done[-1]['model_finish']) if done else ''}" if st.get("runs") else "–")

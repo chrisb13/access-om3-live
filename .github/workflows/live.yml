@@ -2,7 +2,8 @@ name: Live evaluation site
 
 on:
   schedule:
-    - cron: '0 14 * * *'   # midnight AEST
+    - cron: '0 14 * * *'   # midnight AEST: submit jobs for experiments with new output, and publish
+    - cron: '0 2 * * *'    # noon AEST: publish only (results of jobs that finished overnight)
   workflow_dispatch:
     inputs:
       force:
@@ -22,7 +23,7 @@ concurrency:
 jobs:
   live:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    timeout-minutes: 30   # the PBS jobs run on their own; this only submits them and publishes
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -72,6 +73,7 @@ jobs:
         id: submit
         env:
           FORCE: ${{ inputs.force || false }}
+          MODE: ${{ github.event.schedule == '0 2 * * *' && 'collect' || 'submit' }}
         run: |
           set -euo pipefail
           python3 -c 'import shlex, yaml
@@ -83,20 +85,7 @@ jobs:
               print(f"{k.upper()}=" + ("(" + " ".join(map(shlex.quote, v)) + ")" if isinstance(v, list) else shlex.quote(str(v))))' > config.sh
           ssh "$GADI" mkdir -p "$WORK"
           rsync -r gadi config.sh "$GADI:$WORK/"
-          ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA" "$FORCE" | tee -a "$GITHUB_OUTPUT"
-
-      - name: Wait for PBS job
-        if: steps.submit.outputs.jobid != ''
-        env:
-          JOBID: ${{ steps.submit.outputs.jobid }}
-        # /etc/profile puts qstat on PATH (non-interactive SSH only gets /bin:/usr/bin)
-        run: until ssh "$GADI" "source /etc/profile >/dev/null 2>&1; qstat -xf $JOBID" | grep -q 'job_state = F'; do sleep 300; done
-
-      - name: Show PBS job log
-        if: steps.submit.outputs.jobid != ''
-        env:
-          JOBID: ${{ steps.submit.outputs.jobid }}
-        run: ssh "$GADI" "tail -n 40 $WORK/logs/$JOBID.ER" || true   # Gadi names it <jobid>.ER when -e is a folder
+          ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA" "$FORCE" "$MODE" | tee -a "$GITHUB_OUTPUT"
 
       - name: Collect outputs and build site
         if: steps.submit.outputs.rebuild == 'true'
@@ -107,7 +96,7 @@ jobs:
           for e in "${EXPERIMENTS[@]}"; do
             e=$(basename "$e")   # ENAME = name of the archive folder
             rsync -a --include='mkmd/***' --include='*_rendered.ipynb' --include='sypd.png' --exclude='*' \
-              "$GADI:$WORK/access-om3-paper-1/notebooks/mkfigs_output_$e/" "content/$e/" \
+              "$GADI:$WORK/results/$e/" "content/$e/" \
               || echo "::warning::no outputs yet for $e"
           done
           rsync -a "$GADI:$WORK/status/" status/ || echo "::warning::no run status snapshots"

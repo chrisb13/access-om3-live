@@ -24,10 +24,11 @@ It has two parts:
 
 Each night, around midnight Canberra time, a GitHub Actions workflow in
 [{repo}](https://github.com/{repo}) logs in to NCI's Gadi and checks every monitored experiment for
-new output. It re-runs the notebooks, from
-[access-om3-paper-1](https://github.com/ACCESS-Community-Hub/access-om3-paper-1), only for
-experiments that have changed; the others keep the figures from their last run. The
-[OM3 Monitor](live/index.md) page shows when each experiment was last run and which notebooks failed.
+new output. For each experiment that has changed, it submits a Gadi job that re-runs the notebooks
+from [access-om3-paper-1](https://github.com/ACCESS-Community-Hub/access-om3-paper-1); the others
+keep the figures from their last run. A job's results appear once it has finished: the site is
+refreshed at midnight and at noon Canberra time. The [OM3 Monitor](live/index.md) page shows when each
+experiment was last run, whether a job is running, and which notebooks failed.
 
 ## Monitoring a new experiment
 
