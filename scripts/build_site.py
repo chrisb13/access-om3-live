@@ -16,6 +16,8 @@ import json
 
 import yaml
 
+import checks
+
 ROOT = Path(__file__).resolve().parent.parent
 CONTENT, THEME, BUILD, STATUS = ROOT / "content", ROOT / "theme" / "documentation", ROOT / "build", ROOT / "status"
 CONFIGS_SITE = "https://access-om3-configs.access-hive.org.au/latest/"
@@ -89,17 +91,28 @@ def _block(title: str, text: str, kind: str = "note", lang: str = "text", opts: 
             "    ```", ""]
 
 
+def _check(title: str, code: str) -> list:
+    """A collapsed block with a snippet to re-check a statement on Gadi (the code block gets a copy button)."""
+    return _block(f"Check this on Gadi: {title}", code, kind="tip", lang="bash")
+
+
 # Syntax highlighting for the run directory's configuration files (Fortran for namelist-style files)
 LEXERS = {"config.yaml": "yaml", "MOM_input": "fortran", "ice_in": "fortran",
           "nuopc.runconfig": "ini", "nuopc.runseq": "ini"}
 
 
+def _paths(logs: dict) -> list:
+    """The log paths, in the order the page shows them."""
+    return [path for path, _ in sorted(logs.items(), key=_log_order)]
+
+
 def _logs(logs: dict) -> list:
-    """Collapsible blocks with the last lines of each log, titled with its full Gadi path and modification time."""
+    """Collapsible blocks with the last lines of each log, titled with its full Gadi path and modification time,
+    and a check of those times and lines."""
     md = []
     for path, log in sorted(logs.items(), key=_log_order):
         md += _block(f"{path} (last lines; modified {_when(log['mtime'])})", log["text"])
-    return md
+    return md + _check("when these logs were written, and their last lines", checks.log_files(_paths(logs))) if md else md
 
 
 def description(entry, st: dict) -> tuple:
@@ -170,6 +183,16 @@ def _spans(names: list) -> str:
 
 
 def truncation_section(st: dict, work: bool = False) -> list:
+    """'Truncation locations' with a check for it, if there is anything to show."""
+    md = _truncation_text(st, work)
+    t = st.get("work_truncations" if work else "truncations") or {}
+    example = next((f'"$R"/work/{uv}_velocity_truncations' if work else f'"$A"/{s["output"]}/{uv}_velocity_truncations'
+                    for s in t.get("segments", []) for uv, n in s["records"].items() if n), None)
+    return md + _check("the truncation counts, locations and settings",
+                       checks.truncations(st.get("archive"), st.get("run_dir"), work, example)) if md else md
+
+
+def _truncation_text(st: dict, work: bool = False) -> list:
     """Markdown for 'Truncation locations': MOM6 velocity truncations and where they happen, either per
     archived output folder, or (work=True) for the run directory's work/ folder: the current or crashed run."""
     t = st.get("work_truncations" if work else "truncations") or {}
@@ -190,7 +213,8 @@ def truncation_section(st: dict, work: bool = False) -> list:
     where = ("so far in this run (the Truncs column of `work/ocean.stats`)" if work else
              f"in {len(hit)} of {len(segs)} output folders (the Truncs column of each `outputNNN/ocean.stats`)")
     md += [f"⚠️ MOM6 truncated velocities **{total:,}** times {where}. MOM6 truncates a velocity when its CFL number "
-           "exceeds 0.5, and aborts a run after `MAXTRUNC` (10,000 by default) truncations. "
+           "exceeds `CFL_TRUNCATE` (0.5 by default), and stops the run if more than `MAXTRUNC` truncations happen between "
+           "energy saves (MOM6's default is 0, so any truncation stops it; the ACCESS-OM3 configurations set 10,000). "
            f"See [MOM6 velocity truncations]({TIPS}) for how to read the records, and "
            f"[Examine_truncation_data.ipynb]({RECIPE}) for mapping them.\n"]
     if not work:  # one row per output folder that had truncations
@@ -755,6 +779,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
         if dates:
             md.append(f"**Latest model date in `work/log/med.log`:** {dates[-1].split('Model Date:')[1].split()[0]}"
                       f" (rate {dates[-1].split('rate =')[-1].strip()})\n")
+            md += _check("the latest model date", checks.model_date(run_dir))
         md += ["### Log files\n"] + (_logs(st["run_logs"]) or ["No logs found there.\n"])
         md += truncation_section(st, work=True)
         if st.get("configs"):
@@ -762,14 +787,18 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
             for path, cfg in st["configs"].items():
                 md += _block(f"{path} (modified {_when(cfg['mtime'])})", cfg["text"], kind="info",
                              lang=LEXERS.get(os.path.basename(path), "text"), opts='linenums="1"')
+            md += _check("when these files were last modified",
+                         checks.config_files(run_dir, [os.path.basename(p) for p in st["configs"]]))
     md += ["## Archive folder: completed runs\n", f"Read from the payu archive folder `{archive}`.\n",
            f"- **Output folders:** {st.get('outputs', 0)} (latest `{st.get('latest_output')}`)",
            f"- **Model date reached:** {_date(done[-1]['model_finish']) if done else 'unknown'}",
            f"- **Runs recorded by payu:** {len(runs)}, of which failed: {sum(1 for r in runs if r.get('status') not in (0, None))}", ""]
+    md += _check("these counts", checks.archive_counts(archive))
     if sypd_png:
         md += ["### Model throughput\n", "Simulated years per day, made by `plot_sypd.py` from the "
                f"`outputNNN/log/med.log` files of the completed submissions in `{archive}`.\n",
                "![Simulated years per day](sypd.png)\n"]
+        md += _check("the rate in each output's med.log", checks.throughput(archive))
     if runs:
         md += ["### Recent runs\n", f"From payu's job records in `{archive}/payu_jobs`; times are Canberra time.\n",
                "| Run | PBS job | Result | Model period | Wall time (h) | SYPD | Record last modified |",
@@ -779,6 +808,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
             hours = f"{r['seconds'] / 3600:.1f}" if r.get("seconds") else ""
             md.append(f"| {r.get('run')} | {r.get('job_id') or ''} | {_result(r)} | {period} | {hours} | {_sypd(r)} | {_when(r.get('mtime'))} |")
         md.append("")
+        md += _check("this table", checks.recent_runs(archive))
     if st.get("logs"):
         md += ["### Latest logs in the archive folder\n"] + _logs(st["logs"])
     if st.get("metadata"):
