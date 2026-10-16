@@ -65,12 +65,25 @@ def _logs(logs: dict) -> list:
     return md
 
 
+def description(entry, st: dict) -> str:
+    """The experiment's description: from experiments.yml, else the first line of its metadata.yaml description."""
+    if isinstance(entry, dict) and entry.get("description"):
+        return " ".join(str(entry["description"]).split())
+    try:
+        text = str((yaml.safe_load(st.get("metadata") or "") or {}).get("description") or "")
+    except yaml.YAMLError:
+        text = ""
+    first = text.strip().splitlines()[0] if text.strip() else ""
+    return first if len(first) <= 200 else first[:197] + "…"
+
+
 def status_page(e: str, st: dict, pages: list, sypd_png: bool) -> str:
     """Markdown for an experiment's run-status page, from gadi/run_status.py's snapshot."""
     runs, archive, run_dir = st.get("runs", []), st.get("archive", "?"), st.get("run_dir")
     done = [r for r in runs if r.get("model_finish")]
     emoji, sentence = health(st)
-    md = [f"# {e}\n", f"{emoji} **Latest submission:** {sentence}\n",
+    md = [f"# {e}\n"] + ([f"*{st['description']}*\n"] if st.get("description") else []) + [
+          f"{emoji} **Latest submission:** {sentence}\n",
           "**Notebooks:** " + (", ".join(f"[{nb}]({nb}/index.md)" for p in pages for nb in p) or "none yet") + "\n"]
     if run_dir:
         md += ["## Run directory: current or crashed run\n", f"Read from the payu control directory `{run_dir}`.\n"]
@@ -130,7 +143,7 @@ def main(summary_md: str) -> None:
         notebooks = cfg["notebooks"] + (entry.get("notebooks", []) if isinstance(entry, dict) else [])
         e = Path(path).name  # ENAME = name of the archive folder
         if e == "archive":  # submit.sh skips these: the link's target folder must be listed instead
-            rows.append(f"| `{path}` | ⚠️ not monitored: list the folder this `archive` link points to | | | |")
+            rows.append(f"| `{path}` | | ⚠️ not monitored: list the folder this `archive` link points to | | | |")
             continue
         src, pages = CONTENT / e, []
         for nb in notebooks:
@@ -146,6 +159,7 @@ def main(summary_md: str) -> None:
             shutil.copy2(ipynb, dst / "notebook.ipynb")
             pages.append({nb: [f"live/{e}/{nb}/index.md", {"Notebook": f"live/{e}/{nb}/notebook.ipynb"}]})
         st = json.loads((STATUS / f"{e}.json").read_text()) if (STATUS / f"{e}.json").exists() else {}
+        st["description"] = description(entry, st)
         (docs / "live" / e).mkdir(parents=True, exist_ok=True)
         if (src / "sypd.png").exists():
             shutil.copy2(src / "sypd.png", docs / "live" / e)
@@ -161,7 +175,7 @@ def main(summary_md: str) -> None:
         ran = (datetime.fromtimestamp(log.stat().st_mtime, timezone.utc).astimezone(ZoneInfo("Australia/Canberra"))
                .strftime("%Y-%m-%d %H:%M %Z") if log.exists() else "not run yet")
         shown = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for p in pages for nb in p)
-        rows.append(f"| [{e}]({e}/index.md) | {reached} | {ran} | {shown or '–'} | {'<br>'.join(failed) or '–'} |")
+        rows.append(f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {'<br>'.join(failed) or '–'} |")
 
     (docs / "live").mkdir(exist_ok=True)
     (docs / "live" / "index.md").write_text(
@@ -169,7 +183,8 @@ def main(summary_md: str) -> None:
         "<style>.md-sidebar--secondary:not([hidden]) { display: none }</style>\n\n"
         "# OM3 Monitor\n\nNotebooks re-run nightly on Gadi for runs in progress; an experiment is only re-run "
         "when it has new output. Click an experiment for its run status. Times are Canberra time.\n\n"
-        "| Experiment | Latest submission, model date reached | Notebooks last run | Notebooks shown | Failed |\n|---|---|---|---|---|\n"
+        "| Experiment | Description | Latest submission, model date reached | Notebooks last run | Notebooks shown "
+        "| Failed |\n|---|---|---|---|---|---|\n"
         + "\n".join(rows) + "\n")
 
     nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Evaluation Summary": "evaluation-summary.md"}]

@@ -2,9 +2,11 @@
 #PBS -N mkfigs_live
 #PBS -q normal
 #PBS -l ncpus=16
-#PBS -l mem=190GB
-#PBS -l jobfs=10GB
+#PBS -l mem=120GB
+#PBS -l jobfs=1GB
 #PBS -l walltime=04:00:00
+# Sized from a 5-experiment run (Oct 2026): 79 GB peak memory, 83 MB jobfs, 1 h 12 min, 30% CPU use.
+# Gadi charges max(ncpus, mem/4GB) per hour, so memory sets the cost: 120 GB is charged as 30 CPUs.
 #PBS -W umask=0022
 
 # Nightly version of access-om3-paper-1/notebooks/mkfigs.sh: runs NOTEBOOKS for each
