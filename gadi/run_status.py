@@ -9,6 +9,9 @@ import os
 import sys
 
 
+CONFIG_FILES = ("config.yaml", "MOM_input", "ice_in", "nuopc.runconfig", "nuopc.runseq")  # shown in full
+
+
 def tail(path, lines=30, nbytes=16384):
     """Last few lines of a (possibly huge) text file."""
     with open(path, "rb") as f:
@@ -49,17 +52,21 @@ def main(archive, dest, run_dir=None):
     runs.sort(key=lambda r: (int(r["run"] or 0), r["start"] or ""))
 
     outputs = sorted(glob.glob(os.path.join(archive, "output[0-9]*")))
-    logs = [os.path.join(outputs[-1], f) for f in ("access-om3.out", "access-om3.err")] if outputs else []
+    logs = [os.path.join(outputs[-1], f) for f in ("access-om3.out", "access-om3.err", os.path.join("log", "med.log"))
+            ] if outputs else []
     for sub in ("pbs_logs", "error_logs"):  # the two most recent of each
         logs += sorted(glob.glob(os.path.join(archive, sub, "*")), key=os.path.getmtime)[-2:]
     meta = os.path.join(archive, "metadata.yaml")
+    configs = [os.path.join(run_dir, f) for f in CONFIG_FILES] if run_dir else []
     with open(dest, "w") as f:
         json.dump({"archive": archive, "outputs": len(outputs),
                    "latest_output": os.path.basename(outputs[-1]) if outputs else None,
                    "runs": runs,
                    "logs": logs_of(logs),
                    "metadata": open(meta).read() if os.path.isfile(meta) else None,
-                   "run_dir": run_dir, "run_logs": run_dir_logs(run_dir) if run_dir else {}}, f, indent=1)
+                   "run_dir": run_dir, "run_logs": run_dir_logs(run_dir) if run_dir else {},
+                   "configs": {p: {"text": tail(p, lines=100000, nbytes=500000), "mtime": os.path.getmtime(p)}
+                               for p in configs if os.path.isfile(p)}}, f, indent=1)
 
 
 if __name__ == "__main__":

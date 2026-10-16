@@ -2,3 +2,10 @@
 .md-grid {
   max-width: 100%;
 }
+
+/* Numbered code blocks (configuration files): keep each line on one line, scrolling sideways,
+   so the line numbers stay aligned. (!important to override the theme's pre-wrap on pre>code.) */
+.md-typeset .highlighttable pre > code {
+  white-space: pre !important;
+  word-break: normal !important;
+}

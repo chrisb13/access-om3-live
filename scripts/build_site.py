@@ -1,5 +1,6 @@
 """Assemble build/ (docs tree + nav) from Gadi outputs in content/, theme/, pages/ and Experiments.md."""
 import os
+import re
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -56,12 +57,30 @@ def health(st: dict) -> tuple:
                   "it may be queued, or may have been killed.")
 
 
+def _log_order(item) -> tuple:
+    """Sort key for (path, log): model .err, .out, med.log, then PBS .o/.e logs, payu_postscript last; newest first."""
+    name = os.path.basename(item[0])
+    rank = 4 if name.startswith("payu_postscript") else next(
+        (i for i, end in enumerate((".err", ".out", "med.log")) if name.endswith(end)), 3)
+    return rank, -item[1]["mtime"]
+
+
+def _block(title: str, text: str, kind: str = "note", lang: str = "text", opts: str = "") -> list:
+    """A collapsible block holding text, highlighted as lang (opts: extra code-fence options)."""
+    return [f'??? {kind} "{title}"', f"    ``` {lang} {opts}".rstrip(), "\n".join("    " + line for line in text.splitlines()),
+            "    ```", ""]
+
+
+# Syntax highlighting for the run directory's configuration files (Fortran for namelist-style files)
+LEXERS = {"config.yaml": "yaml", "MOM_input": "fortran", "ice_in": "fortran",
+          "nuopc.runconfig": "ini", "nuopc.runseq": "ini"}
+
+
 def _logs(logs: dict) -> list:
     """Collapsible blocks with the last lines of each log, titled with its full Gadi path and modification time."""
     md = []
-    for path, log in logs.items():
-        body = "\n".join("        " + line for line in log["text"].splitlines())
-        md += [f'??? note "{path} (last lines; modified {_when(log["mtime"])})"', "    ```text", body, "    ```", ""]
+    for path, log in sorted(logs.items(), key=_log_order):
+        md += _block(f"{path} (last lines; modified {_when(log['mtime'])})", log["text"])
     return md
 
 
@@ -77,14 +96,40 @@ def description(entry, st: dict) -> str:
     return first if len(first) <= 200 else first[:197] + "…"
 
 
-def status_page(e: str, st: dict, pages: list, sypd_png: bool) -> str:
+def failures(errors_log: Path) -> dict:
+    """{notebook: error text} from mkfigs' mkfigs_errors.log (sections headed 'FAILED: <notebook>')."""
+    out, nb = {}, None
+    for line in errors_log.read_text().splitlines() if errors_log.exists() else []:
+        if line.startswith("FAILED: "):
+            nb = line[8:].strip()
+            out[nb] = []
+        elif nb and not set(line) <= {"="}:
+            out[nb].append(line)
+    return {k: "\n".join(v).strip() for k, v in out.items()}
+
+
+def failure_page(e: str, nb: str, error: str, ran: str, partial_md: str, has_notebook: bool) -> str:
+    """Markdown for a notebook that failed: the key error lines, the full error, and anything it made first."""
+    key = [l for l in error.splitlines() if re.search(r"Error|Exception|No such|Permission|direct cause|During handling", l)]
+    md = [f"# {nb} ❌\n", f"This notebook **failed** in the latest run for **{e}** ({ran}).\n", "## Why it failed\n",
+          "The lines below are picked out of the error; the first error listed is usually the cause.\n",
+          "```text", "\n".join(key) or error[-2000:], "```", ""]
+    md += _block("Full error (from mkfigs_errors.log)", error, kind="failure")
+    if has_notebook:
+        md.append("The [partly-run notebook](notebook.ipynb) shows every cell up to and including the one that failed.\n")
+    if partial_md:
+        md += ["## Figures made before the failure\n", partial_md.split("\n", 1)[-1]]  # drop mkmd's own heading
+    return "\n".join(md)
+
+
+def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     """Markdown for an experiment's run-status page, from gadi/run_status.py's snapshot."""
     runs, archive, run_dir = st.get("runs", []), st.get("archive", "?"), st.get("run_dir")
     done = [r for r in runs if r.get("model_finish")]
     emoji, sentence = health(st)
     md = [f"# {e}\n"] + ([f"*{st['description']}*\n"] if st.get("description") else []) + [
           f"{emoji} **Latest submission:** {sentence}\n",
-          "**Notebooks:** " + (", ".join(f"[{nb}]({nb}/index.md)" for p in pages for nb in p) or "none yet") + "\n"]
+          f"**Notebooks:** {nb_links or 'none yet'}\n"]
     if run_dir:
         md += ["## Run directory: current or crashed run\n", f"Read from the payu control directory `{run_dir}`.\n"]
         med = next((v["text"] for k, v in st["run_logs"].items() if k.endswith("work/log/med.log")), "")
@@ -92,7 +137,12 @@ def status_page(e: str, st: dict, pages: list, sypd_png: bool) -> str:
         if dates:
             md.append(f"**Latest model date in `work/log/med.log`:** {dates[-1].split('Model Date:')[1].split()[0]}"
                       f" (rate {dates[-1].split('rate =')[-1].strip()})\n")
-        md += _logs(st["run_logs"]) or ["No logs found there.\n"]
+        md += ["### Log files\n"] + (_logs(st["run_logs"]) or ["No logs found there.\n"])
+        if st.get("configs"):
+            md.append("### Configuration files\n")
+            for path, cfg in st["configs"].items():
+                md += _block(f"{path} (modified {_when(cfg['mtime'])})", cfg["text"], kind="info",
+                             lang=LEXERS.get(os.path.basename(path), "text"), opts='linenums="1"')
     md += ["## Archive folder: completed runs\n", f"Read from the payu archive folder `{archive}`.\n",
            f"- **Output folders:** {st.get('outputs', 0)} (latest `{st.get('latest_output')}`)",
            f"- **Model date reached:** {done[-1]['model_finish'][:10] if done else 'unknown'}",
@@ -113,7 +163,7 @@ def status_page(e: str, st: dict, pages: list, sypd_png: bool) -> str:
     if st.get("logs"):
         md += ["### Latest logs in the archive folder\n"] + _logs(st["logs"])
     if st.get("metadata"):
-        md += [f'??? info "{archive}/metadata.yaml"', "    ```yaml", "\n".join("    " + l for l in st["metadata"].splitlines()), "    ```", ""]
+        md += _block(f"{archive}/metadata.yaml", st["metadata"], kind="info", lang="yaml")
     return "\n".join(md)
 
 
@@ -145,37 +195,45 @@ def main(summary_md: str) -> None:
         if e == "archive":  # submit.sh skips these: the link's target folder must be listed instead
             rows.append(f"| `{path}` | | ⚠️ not monitored: list the folder this `archive` link points to | | | |")
             continue
-        src, pages = CONTENT / e, []
+        src, pages, ok = CONTENT / e, [], []
+        errors, log = src / "mkmd" / "mkfigs_errors.log", src / "mkmd" / "mkfigs_run.log"
+        failed = failures(errors)
+        ran = (datetime.fromtimestamp(log.stat().st_mtime, timezone.utc).astimezone(ZoneInfo("Australia/Canberra"))
+               .strftime("%Y-%m-%d %H:%M %Z") if log.exists() else "not run yet")
         for nb in notebooks:
             md, ipynb = src / "mkmd" / f"{nb}.md", src / f"{nb}_rendered.ipynb"
-            if not (md.exists() and ipynb.exists()):
+            if not ((md.exists() and ipynb.exists()) or nb in failed):
                 continue
             dst = docs / "live" / e / nb
             dst.mkdir(parents=True)
-            text = md.read_text().replace(f"/assets/experiments/{e}/", "")  # figures sit beside the page
-            (dst / "index.md").write_text(text.replace(f"notebooks/{nb}.ipynb", "notebook.ipynb"))
+            text = md.read_text().replace(f"/assets/experiments/{e}/", "") if md.exists() else ""  # figures sit beside the page
+            text = text.replace(f"notebooks/{nb}.ipynb", "notebook.ipynb")
             for png in (src / "mkmd").glob(f"{nb}_[0-9]*.png"):
                 shutil.copy2(png, dst)
-            shutil.copy2(ipynb, dst / "notebook.ipynb")
-            pages.append({nb: [f"live/{e}/{nb}/index.md", {"Notebook": f"live/{e}/{nb}/notebook.ipynb"}]})
+            if ipynb.exists():
+                shutil.copy2(ipynb, dst / "notebook.ipynb")
+            if nb in failed:
+                print(f"::warning::{e}: notebook {nb} failed")
+                (dst / "index.md").write_text(failure_page(e, nb, failed[nb], ran, text, ipynb.exists()))
+                sub = [{"Notebook (partly run)": f"live/{e}/{nb}/notebook.ipynb"}] if ipynb.exists() else []
+                pages.append({f"{nb} ❌": [f"live/{e}/{nb}/index.md", *sub]})
+            else:
+                (dst / "index.md").write_text(text)
+                ok.append(nb)
+                pages.append({nb: [f"live/{e}/{nb}/index.md", {"Notebook": f"live/{e}/{nb}/notebook.ipynb"}]})
+        shown = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for nb in ok)
+        broke = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for nb in failed)
+        links = ", ".join([f"[{nb}]({nb}/index.md)" for nb in ok] + [f"❌ [{nb}]({nb}/index.md)" for nb in failed])
         st = json.loads((STATUS / f"{e}.json").read_text()) if (STATUS / f"{e}.json").exists() else {}
         st["description"] = description(entry, st)
         (docs / "live" / e).mkdir(parents=True, exist_ok=True)
         if (src / "sypd.png").exists():
             shutil.copy2(src / "sypd.png", docs / "live" / e)
-        (docs / "live" / e / "index.md").write_text(status_page(e, st, pages, (src / "sypd.png").exists()))
+        (docs / "live" / e / "index.md").write_text(status_page(e, st, links, (src / "sypd.png").exists()))
         live_nav.append({e: [f"live/{e}/index.md", *pages]})
         done = [r for r in st.get("runs", []) if r.get("model_finish")]
         reached = f"{health(st)[0]} {done[-1]['model_finish'][:10] if done else ''}" if st.get("runs") else "–"
-
-        errors, log = src / "mkmd" / "mkfigs_errors.log", src / "mkmd" / "mkfigs_run.log"
-        failed = [l[8:].strip() for l in errors.read_text().splitlines() if l.startswith("FAILED: ")] if errors.exists() else []
-        for nb in failed:
-            print(f"::warning::{e}: notebook {nb} failed")
-        ran = (datetime.fromtimestamp(log.stat().st_mtime, timezone.utc).astimezone(ZoneInfo("Australia/Canberra"))
-               .strftime("%Y-%m-%d %H:%M %Z") if log.exists() else "not run yet")
-        shown = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for p in pages for nb in p)
-        rows.append(f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {'<br>'.join(failed) or '–'} |")
+        rows.append(f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |")
 
     (docs / "live").mkdir(exist_ok=True)
     (docs / "live" / "index.md").write_text(
