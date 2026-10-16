@@ -13,6 +13,11 @@ import sys
 CONFIG_FILES = ("config.yaml", "MOM_input", "ice_in", "nuopc.runconfig", "nuopc.runseq")  # shown in full
 
 
+def readable(path):
+    """True for a file this account may read: other people's runs can have files only they can read."""
+    return os.path.isfile(path) and os.access(path, os.R_OK)
+
+
 def tail(path, lines=30, nbytes=16384):
     """Last few lines of a (possibly huge) text file."""
     with open(path, "rb") as f:
@@ -24,7 +29,7 @@ def tail(path, lines=30, nbytes=16384):
 def logs_of(paths):
     """{full path: {"text": last lines, "mtime": modification time}} for the non-empty files among paths."""
     return {p: {"text": tail(p), "mtime": os.path.getmtime(p)}
-            for p in paths if os.path.isfile(p) and os.path.getsize(p)}
+            for p in paths if readable(p) and os.path.getsize(p)}
 
 
 def run_dir_logs(run_dir):
@@ -59,7 +64,7 @@ def truncations(outputs):
     for out in outputs:
         seg = {"output": os.path.basename(out), "truncs": None, "max_cfl": None, "records": {}, "capped_pes": []}
         stats = os.path.join(out, "ocean.stats")
-        if os.path.isfile(stats):
+        if readable(stats):
             seg["truncs"], cfls = 0, []
             for line in open(stats, errors="replace"):
                 f = line.split(",")
@@ -69,7 +74,7 @@ def truncations(outputs):
             seg["max_cfl"] = max(cfls) if cfls else None
         for uv in "UV":
             path = os.path.join(out, uv + "_velocity_truncations")
-            if not os.path.isfile(path):
+            if not readable(path):
                 continue
             per_pe, rec = {}, None
             for line in list(open(path, errors="replace")) + ["Time end"]:
@@ -124,6 +129,8 @@ def main(archive, dest, run_dir=None):
     """Collect payu run records (payu_jobs/*/run/*.json), output count and recent log tails."""
     runs = []
     for jf in glob.glob(os.path.join(archive, "payu_jobs", "*", "run", "*.json")):
+        if not readable(jf):
+            continue
         try:
             with open(jf) as f:
                 d = json.load(f)
@@ -149,12 +156,12 @@ def main(archive, dest, run_dir=None):
                    "latest_output": os.path.basename(outputs[-1]) if outputs else None,
                    "runs": runs,
                    "logs": logs_of(logs),
-                   "metadata": open(meta).read() if os.path.isfile(meta) else None,
+                   "metadata": open(meta).read() if readable(meta) else None,
                    "truncations": truncations(outputs),
                    "run_dir": run_dir,
                    "work_truncations": truncations([os.path.join(run_dir, "work")]) if run_dir else None, "run_logs": run_dir_logs(run_dir) if run_dir else {},
                    "configs": {p: {"text": tail(p, lines=100000, nbytes=500000), "mtime": os.path.getmtime(p)}
-                               for p in configs if os.path.isfile(p)}}, f, indent=1)
+                               for p in configs if readable(p)}}, f, indent=1)
 
 
 if __name__ == "__main__":

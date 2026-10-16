@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import sys
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -89,7 +90,8 @@ def description(entry, st: dict) -> str:
     if isinstance(entry, dict) and entry.get("description"):
         return " ".join(str(entry["description"]).split())
     try:
-        text = str((yaml.safe_load(st.get("metadata") or "") or {}).get("description") or "")
+        meta = yaml.safe_load(st.get("metadata") or "")
+        text = str((meta if isinstance(meta, dict) else {}).get("description") or "")
     except yaml.YAMLError:
         text = ""
     first = text.strip().splitlines()[0] if text.strip() else ""
@@ -180,7 +182,7 @@ def truncation_section(st: dict, work: bool = False) -> list:
             break
         rec = " / ".join(str(s["records"].get(uv, "–")) for uv in "UV") if s["records"] else "–"
         md.append(f"| {s['output']} | {periods.get(s['output'], '')} | {s['truncs']:,} | "
-                  f"{s['max_cfl']:.2f} | {rec} | {', '.join(map(str, s['capped_pes'])) or '–'} |")
+                  f"{'–' if s['max_cfl'] is None else format(s['max_cfl'], '.2f')} | {rec} | {', '.join(map(str, s['capped_pes'])) or '–'} |")
     md += ["", "**Where MOM6 truncates** (1° boxes, most records first; from the `U_velocity_truncations` and "
            "`V_velocity_truncations` files):\n",
            "| Location | Records | Grid cells | Seen in output | Velocity | Layers | Max speed (m/s) | Max CFL "
@@ -245,6 +247,62 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     return "\n".join(md)
 
 
+def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
+    """Write one experiment's notebook, failure and status pages; return (its menu entry, its table row)."""
+    src, pages, ok = CONTENT / e, [], []
+    errors, log = src / "mkmd" / "mkfigs_errors.log", src / "mkmd" / "mkfigs_run.log"
+    failed = failures(errors)
+    ran = (datetime.fromtimestamp(log.stat().st_mtime, timezone.utc).astimezone(ZoneInfo("Australia/Canberra"))
+           .strftime("%Y-%m-%d %H:%M %Z") if log.exists() else "not run yet")
+    for nb in notebooks:
+        md, ipynb = src / "mkmd" / f"{nb}.md", src / f"{nb}_rendered.ipynb"
+        if not ((md.exists() and ipynb.exists()) or nb in failed):
+            continue
+        dst = docs / "live" / e / nb
+        dst.mkdir(parents=True)
+        text = md.read_text().replace(f"/assets/experiments/{e}/", "") if md.exists() else ""  # figures sit beside the page
+        text = text.replace(f"notebooks/{nb}.ipynb", "notebook.ipynb")
+        for png in (src / "mkmd").glob(f"{nb}_[0-9]*.png"):
+            shutil.copy2(png, dst)
+        if ipynb.exists() and not _valid_json(ipynb):  # e.g. a notebook cut short: don't let it break mkdocs
+            print(f"::warning::{e}: {ipynb.name} is not valid JSON; not shown")
+            ipynb = Path("/nonexistent")
+        if ipynb.exists():
+            shutil.copy2(ipynb, dst / "notebook.ipynb")
+        if nb in failed:
+            print(f"::warning::{e}: notebook {nb} failed")
+            (dst / "index.md").write_text(failure_page(e, nb, failed[nb], ran, text, ipynb.exists()))
+            sub = [{"Notebook (partly run)": f"live/{e}/{nb}/notebook.ipynb"}] if ipynb.exists() else []
+            pages.append({f"{nb} ❌": [f"live/{e}/{nb}/index.md", *sub]})
+        else:
+            (dst / "index.md").write_text(text)
+            ok.append(nb)
+            sub = [{"Notebook": f"live/{e}/{nb}/notebook.ipynb"}] if ipynb.exists() else []
+            pages.append({nb: [f"live/{e}/{nb}/index.md", *sub]})
+    shown = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for nb in ok)
+    broke = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for nb in failed)
+    links = ", ".join([f"[{nb}]({nb}/index.md)" for nb in ok] + [f"❌ [{nb}]({nb}/index.md)" for nb in failed])
+    st = json.loads((STATUS / f"{e}.json").read_text()) if (STATUS / f"{e}.json").exists() else {}
+    st["description"] = description(entry, st)
+    (docs / "live" / e).mkdir(parents=True, exist_ok=True)
+    if (src / "sypd.png").exists():
+        shutil.copy2(src / "sypd.png", docs / "live" / e)
+    (docs / "live" / e / "index.md").write_text(status_page(e, st, links, (src / "sypd.png").exists()))
+    done = [r for r in st.get("runs", []) if r.get("model_finish")]
+    reached = f"{health(st)[0]} {done[-1]['model_finish'][:10] if done else ''}" if st.get("runs") else "–"
+    return ({e: [f"live/{e}/index.md", *pages]},
+            f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |")
+
+
+def _valid_json(path: Path) -> bool:
+    """True if path holds valid JSON (a rendered notebook that was written completely)."""
+    try:
+        json.loads(path.read_text())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def main(summary_md: str) -> None:
     """Write build/docs and build/mkdocs.yml."""
     cfg = yaml.safe_load((ROOT / "experiments.yml").read_text())
@@ -273,45 +331,18 @@ def main(summary_md: str) -> None:
         if e == "archive":  # submit.sh skips these: the link's target folder must be listed instead
             rows.append(f"| `{path}` | | ⚠️ not monitored: list the folder this `archive` link points to | | | |")
             continue
-        src, pages, ok = CONTENT / e, [], []
-        errors, log = src / "mkmd" / "mkfigs_errors.log", src / "mkmd" / "mkfigs_run.log"
-        failed = failures(errors)
-        ran = (datetime.fromtimestamp(log.stat().st_mtime, timezone.utc).astimezone(ZoneInfo("Australia/Canberra"))
-               .strftime("%Y-%m-%d %H:%M %Z") if log.exists() else "not run yet")
-        for nb in notebooks:
-            md, ipynb = src / "mkmd" / f"{nb}.md", src / f"{nb}_rendered.ipynb"
-            if not ((md.exists() and ipynb.exists()) or nb in failed):
-                continue
-            dst = docs / "live" / e / nb
-            dst.mkdir(parents=True)
-            text = md.read_text().replace(f"/assets/experiments/{e}/", "") if md.exists() else ""  # figures sit beside the page
-            text = text.replace(f"notebooks/{nb}.ipynb", "notebook.ipynb")
-            for png in (src / "mkmd").glob(f"{nb}_[0-9]*.png"):
-                shutil.copy2(png, dst)
-            if ipynb.exists():
-                shutil.copy2(ipynb, dst / "notebook.ipynb")
-            if nb in failed:
-                print(f"::warning::{e}: notebook {nb} failed")
-                (dst / "index.md").write_text(failure_page(e, nb, failed[nb], ran, text, ipynb.exists()))
-                sub = [{"Notebook (partly run)": f"live/{e}/{nb}/notebook.ipynb"}] if ipynb.exists() else []
-                pages.append({f"{nb} ❌": [f"live/{e}/{nb}/index.md", *sub]})
-            else:
-                (dst / "index.md").write_text(text)
-                ok.append(nb)
-                pages.append({nb: [f"live/{e}/{nb}/index.md", {"Notebook": f"live/{e}/{nb}/notebook.ipynb"}]})
-        shown = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for nb in ok)
-        broke = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for nb in failed)
-        links = ", ".join([f"[{nb}]({nb}/index.md)" for nb in ok] + [f"❌ [{nb}]({nb}/index.md)" for nb in failed])
-        st = json.loads((STATUS / f"{e}.json").read_text()) if (STATUS / f"{e}.json").exists() else {}
-        st["description"] = description(entry, st)
-        (docs / "live" / e).mkdir(parents=True, exist_ok=True)
-        if (src / "sypd.png").exists():
-            shutil.copy2(src / "sypd.png", docs / "live" / e)
-        (docs / "live" / e / "index.md").write_text(status_page(e, st, links, (src / "sypd.png").exists()))
-        live_nav.append({e: [f"live/{e}/index.md", *pages]})
-        done = [r for r in st.get("runs", []) if r.get("model_finish")]
-        reached = f"{health(st)[0]} {done[-1]['model_finish'][:10] if done else ''}" if st.get("runs") else "–"
-        rows.append(f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |")
+        try:
+            nav, row = experiment_pages(e, entry, notebooks, docs)
+        except Exception as err:  # one bad experiment must not take the whole site down
+            print(f"::error::{e}: its pages could not be built: {err!r}")
+            traceback.print_exc()
+            shutil.rmtree(docs / "live" / e, ignore_errors=True)
+            (docs / "live" / e).mkdir(parents=True)
+            (docs / "live" / e / "index.md").write_text(
+                f"# {e}\n\n⚠️ This experiment's pages could not be built:\n\n```text\n{traceback.format_exc()}```\n")
+            nav, row = {e: [f"live/{e}/index.md"]}, f"| [{e}]({e}/index.md) | | ⚠️ pages could not be built (see its page) | | | |"
+        live_nav.append(nav)
+        rows.append(row)
 
     (docs / "live").mkdir(exist_ok=True)
     (docs / "live" / "index.md").write_text(
