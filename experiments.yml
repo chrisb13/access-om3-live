@@ -12,9 +12,12 @@
 #     notebooks: [MLD, SST]
 experiments:
   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
-  - /g/data/ol01/outputs/access-om3-8km/MC_8km_jra_ryf-test2-expt-c349f800
+  - archive: /g/data/ol01/outputs/access-om3-8km/MC_8km_jra_ryf-test2-expt-c349f800
+    run_dir: /g/data/tm70/cyb561/access-om3-runs/8k/MC_8km_jra_ryf-test2
   - /g/data/ol01/outputs/access-om3-100km/MC_100km_jra_iaf+wombatlite-test1-e1de2a94
-  - /scratch/tm70/ek4684/test1/archive
+  - archive: /scratch/tm70/ek4684/access-om3/archive/test1-MCW_100km_era_iaf-908e8682
+    run_dir: /scratch/tm70/ek4684/test1
+  - /scratch/tm70/hm6113/access-om3/archive/exp2.0_run2-expt-3d030595
 
 # Notebooks run for every experiment, from this access-om3-paper-1 git ref.
 # (pull/137/head until PR #137, which adds ocean_stats, is merged; then main.)
