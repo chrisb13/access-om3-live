@@ -122,6 +122,82 @@ def failure_page(e: str, nb: str, error: str, ran: str, partial_md: str, has_not
     return "\n".join(md)
 
 
+TIPS = "https://access-om3-configs.access-hive.org.au/latest/Tips-and-tricks/#mom6-velocity-truncations"
+RECIPE = "https://github.com/ACCESS-NRI/access-eval-recipes/blob/main/ocean/Examine_truncation_data.ipynb"
+
+
+# A pin at the point, zoomed out to regional scale (zoom 5, as in a typical "@lat,lon,5z" Google Maps link)
+MAPS = "https://www.google.com/maps/place/{lat:.2f},{lon:.2f}/@{lat:.2f},{lon:.2f},5z"
+
+
+def _place(lon: float, lat: float) -> str:
+    """'73.3°E, 67.9°N' linked to Google Maps."""
+    lon = (lon + 180) % 360 - 180
+    return f"[{abs(lon):.1f}°{'E' if lon >= 0 else 'W'}, {abs(lat):.1f}°{'N' if lat >= 0 else 'S'}]({MAPS.format(lat=lat, lon=lon)})"
+
+
+def _spans(names: list) -> str:
+    """['output001', 'output002', 'output005'] -> '001–002, 005'."""
+    if not all(n[-3:].isdigit() for n in names):
+        return ", ".join(names)  # e.g. 'work'
+    nums, out = sorted(int(n[-3:]) for n in names), []
+    for n in nums:
+        if out and n == out[-1][1] + 1:
+            out[-1][1] = n
+        else:
+            out.append([n, n])
+    return ", ".join(f"{a:03d}" + (f"–{b:03d}" if b > a else "") for a, b in out)
+
+
+def truncation_section(st: dict, work: bool = False) -> list:
+    """Markdown for 'Truncation locations': MOM6 velocity truncations and where they happen, either per
+    archived output folder, or (work=True) for the run directory's work/ folder: the current or crashed run."""
+    t = st.get("work_truncations" if work else "truncations") or {}
+    segs = [s for s in t.get("segments", []) if s["truncs"] is not None]
+    if work and not segs:
+        return []  # no work/ocean.stats: nothing running, or not started yet
+    md = ["### Truncation locations\n"]
+    if not segs:
+        return md + ["No `ocean.stats` files found in the output folders.\n"]
+    total, hit = sum(s["truncs"] for s in segs), [s for s in segs if s["truncs"]]
+    if work and not total:
+        return md + ["✅ No velocity truncations so far in this run (`work/ocean.stats`).\n"]
+    if not total:
+        return md + [f"✅ No velocity truncations: the Truncs column of `ocean.stats` is zero in all {len(segs)} output folders.\n"]
+    periods = {f"output{int(r['run']):03d}": f"{r['model_start'][:7]} → {r['model_finish'][:7]}"
+               for r in st.get("runs", []) if r.get("run") is not None and r.get("model_finish")}
+    where = ("so far in this run (the Truncs column of `work/ocean.stats`)" if work else
+             f"in {len(hit)} of {len(segs)} output folders (the Truncs column of each `outputNNN/ocean.stats`)")
+    md += [f"⚠️ MOM6 truncated velocities **{total:,}** times {where}. MOM6 truncates a velocity when its CFL number "
+           "exceeds 0.5, and aborts a run after `MAXTRUNC` (10,000 by default) truncations. "
+           f"See [MOM6 velocity truncations]({TIPS}) for how to read the records, and "
+           f"[Examine_truncation_data.ipynb]({RECIPE}) for mapping them.\n",
+           "| Output folder | Model period | Truncations | Max CFL | Records in U / V files | PEs at the record cap |",
+           "|---|---|---:|---:|---|---|"]
+    for s in segs:
+        if work:
+            md[-2:] = []  # one folder: the summary sentence says it all
+            break
+        rec = " / ".join(str(s["records"].get(uv, "–")) for uv in "UV") if s["records"] else "–"
+        md.append(f"| {s['output']} | {periods.get(s['output'], '')} | {s['truncs']:,} | "
+                  f"{s['max_cfl']:.2f} | {rec} | {', '.join(map(str, s['capped_pes'])) or '–'} |")
+    md += ["", "**Where MOM6 truncates** (1° boxes, most records first; from the `U_velocity_truncations` and "
+           "`V_velocity_truncations` files):\n",
+           "| Location | Records | Grid cells | Seen in output | Velocity | Layers | Max speed (m/s) | Max CFL "
+           "| Surface height (m) | Depth (m) |", "|---|---:|---:|---|---|---|---:|---:|---:|---:|"]
+    for b in t.get("boxes", []):
+        md.append(f"| {_place(b['lon'], b['lat'])} | {b['records']}{'*' if b['capped'] else ''} | {b['cells']} | "
+                  f"{_spans(b['outputs'])} | {', '.join(b['uv'])} | {b['layers'][0]}–{b['layers'][1]} | "
+                  f"{b['max_vel']:.1f} | {b['max_cfl']:.2f} | "
+                  f"{'' if b['top_e'] is None else format(b['top_e'], '.2f')} | "
+                  f"{'' if b['depth'] is None else format(b['depth'], '.0f')} |")
+    md += ["", "\\* MOM6 writes at most 50 records per PE per run (`MAX_TRUNC_FILE_SIZE_PER_PE`), and this box's PE hit "
+           "that cap in at least one run, so it truncated more often than the record count shows. Surface height is "
+           "the top-interface height `e`, shown only for records that include layer 1; depth is the shallower of the "
+           "two cells (`D`).\n"]
+    return md
+
+
 def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     """Markdown for an experiment's run-status page, from gadi/run_status.py's snapshot."""
     runs, archive, run_dir = st.get("runs", []), st.get("archive", "?"), st.get("run_dir")
@@ -138,6 +214,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
             md.append(f"**Latest model date in `work/log/med.log`:** {dates[-1].split('Model Date:')[1].split()[0]}"
                       f" (rate {dates[-1].split('rate =')[-1].strip()})\n")
         md += ["### Log files\n"] + (_logs(st["run_logs"]) or ["No logs found there.\n"])
+        md += truncation_section(st, work=True)
         if st.get("configs"):
             md.append("### Configuration files\n")
             for path, cfg in st["configs"].items():
@@ -164,6 +241,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
         md += ["### Latest logs in the archive folder\n"] + _logs(st["logs"])
     if st.get("metadata"):
         md += _block(f"{archive}/metadata.yaml", st["metadata"], kind="info", lang="yaml")
+    md += truncation_section(st)
     return "\n".join(md)
 
 

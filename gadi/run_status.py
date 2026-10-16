@@ -6,6 +6,7 @@ RUN_DIR is the payu control directory: it holds the current (or crashed) run's P
 import glob
 import json
 import os
+import re
 import sys
 
 
@@ -32,6 +33,91 @@ def run_dir_logs(run_dir):
     paths = pbs + [os.path.join(run_dir, f) for f in ("access-om3.out", "access-om3.err",
                                                        os.path.join("work", "log", "med.log"))]
     return logs_of(paths)
+
+
+# First line of each record in U/V_velocity_truncations, e.g.
+# Time 1900 0   0.97 U-velocity violation at 6051: 35, 14 (   2.83 E   79.14 N) Layers 52 to 68. dt =  240.0
+TRUNC_HEAD = re.compile(r"Time\s+\d+\s+\d+\s+[\d.]+\s+([UV])-velocity violation at\s+(\d+):\s*(\d+),?\s+(\d+)\s*"
+                        r"\(\s*(-?[\d.]+)\s*E\s+(-?[\d.]+)\s*N\)\s*Layers\s+(\d+)\s+to\s+(\d+)\.\s*dt\s*=\s*([\d.]+)")
+TRUNC_CAP = 50  # MOM6 MAX_TRUNC_FILE_SIZE_PER_PE default: records written per PE per run
+
+
+def _values(line):
+    """Numbers after the first ':' on a truncation-record line."""
+    out = []
+    for tok in line.split(":", 1)[1].split():
+        try:
+            out.append(float(tok))
+        except ValueError:
+            pass
+    return out
+
+
+def truncations(outputs):
+    """Per-output truncation counts (ocean.stats) and records (U/V_velocity_truncations), grouped by 1-degree box."""
+    segments, boxes = [], {}
+    for out in outputs:
+        seg = {"output": os.path.basename(out), "truncs": None, "max_cfl": None, "records": {}, "capped_pes": []}
+        stats = os.path.join(out, "ocean.stats")
+        if os.path.isfile(stats):
+            seg["truncs"], cfls = 0, []
+            for line in open(stats, errors="replace"):
+                f = line.split(",")
+                if len(f) > 4 and f[0].strip().isdigit():
+                    seg["truncs"] += int(float(f[2]))
+                    cfls += [float(v) for v in f[4].split()[1:2]]
+            seg["max_cfl"] = max(cfls) if cfls else None
+        for uv in "UV":
+            path = os.path.join(out, uv + "_velocity_truncations")
+            if not os.path.isfile(path):
+                continue
+            per_pe, rec = {}, None
+            for line in list(open(path, errors="replace")) + ["Time end"]:
+                if line.startswith("Time"):
+                    if rec:
+                        key = (round(rec["lon"]), round(rec["lat"]))
+                        b = boxes.setdefault(key, {"records": 0, "cells": set(), "outputs": set(), "uv": set(),
+                                                   "lon": [], "lat": [], "layers": [], "max_vel": 0, "max_cfl": 0,
+                                                   "top_e": None, "depth": None, "capped": False})
+                        b["records"] += 1
+                        b["cells"].add((rec["lon"], rec["lat"]))
+                        b["outputs"].add(seg["output"])
+                        b["uv"].add(rec["uv"])
+                        b["lon"].append(rec["lon"]), b["lat"].append(rec["lat"])
+                        b["layers"] += [rec["k0"], rec["k1"]]
+                        b["max_vel"] = max(b["max_vel"], rec.get("vel", 0))
+                        b["max_cfl"] = max(b["max_cfl"], rec.get("cfl", 0))
+                        if rec.get("top_e") is not None:
+                            b["top_e"] = max(b["top_e"] or rec["top_e"], rec["top_e"], key=abs)
+                        if rec.get("depth") is not None:
+                            b["depth"] = min(b["depth"] or rec["depth"], rec["depth"])
+                        b["pes"] = b.get("pes", set()) | {rec["pe"]}
+                    m = TRUNC_HEAD.search(line)
+                    rec = None
+                    if m:
+                        rec = {"uv": m.group(1), "pe": int(m.group(2)), "lon": float(m.group(5)),
+                               "lat": float(m.group(6)), "k0": int(m.group(7)), "k1": int(m.group(8))}
+                        per_pe[rec["pe"]] = per_pe.get(rec["pe"], 0) + 1
+                elif rec and ":" in line:
+                    name, vals = line.split(":", 1)[0].strip(), _values(line)
+                    if vals and name in ("u(m)", "v(m)"):
+                        rec["vel"] = max(abs(v) for v in vals)
+                    elif vals and name in ("CFL u", "CFL v"):
+                        rec["cfl"] = max(vals)
+                    elif vals and name in ("e-", "e+") and rec["k0"] == 1:  # top interface = sea surface height
+                        rec["top_e"] = max(rec.get("top_e", vals[0]), vals[0], key=abs)
+                    elif vals and name == "D":
+                        rec["depth"] = min(vals)
+            seg["records"][uv] = sum(per_pe.values())
+            seg["capped_pes"] += [pe for pe, n in per_pe.items() if n >= TRUNC_CAP]
+        segments.append(seg)
+    capped = set(pe for s in segments for pe in s["capped_pes"])
+    ranked = sorted(boxes.items(), key=lambda kv: -kv[1]["records"])
+    return {"segments": segments, "boxes": [
+        {"box": [k[0], k[1]], "lon": sum(b["lon"]) / len(b["lon"]), "lat": sum(b["lat"]) / len(b["lat"]),
+         "records": b["records"], "cells": len(b["cells"]), "outputs": sorted(b["outputs"]), "uv": sorted(b["uv"]),
+         "layers": [min(b["layers"]), max(b["layers"])], "max_vel": b["max_vel"], "max_cfl": b["max_cfl"],
+         "top_e": b["top_e"], "depth": b["depth"], "capped": bool(b["pes"] & capped)} for k, b in ranked[:20]]}
 
 
 def main(archive, dest, run_dir=None):
@@ -64,7 +150,9 @@ def main(archive, dest, run_dir=None):
                    "runs": runs,
                    "logs": logs_of(logs),
                    "metadata": open(meta).read() if os.path.isfile(meta) else None,
-                   "run_dir": run_dir, "run_logs": run_dir_logs(run_dir) if run_dir else {},
+                   "truncations": truncations(outputs),
+                   "run_dir": run_dir,
+                   "work_truncations": truncations([os.path.join(run_dir, "work")]) if run_dir else None, "run_logs": run_dir_logs(run_dir) if run_dir else {},
                    "configs": {p: {"text": tail(p, lines=100000, nbytes=500000), "mtime": os.path.getmtime(p)}
                                for p in configs if os.path.isfile(p)}}, f, indent=1)
 
