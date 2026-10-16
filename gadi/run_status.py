@@ -62,7 +62,8 @@ def truncations(outputs):
     """Per-output truncation counts (ocean.stats) and records (U/V_velocity_truncations), grouped by 1-degree box."""
     segments, boxes = [], {}
     for out in outputs:
-        seg = {"output": os.path.basename(out), "truncs": None, "max_cfl": None, "records": {}, "capped_pes": []}
+        seg = {"output": os.path.basename(out), "truncs": None, "max_cfl": None, "records": {}, "capped_pes": [],
+               "unreadable": []}
         stats = os.path.join(out, "ocean.stats")
         if readable(stats):
             seg["truncs"], cfls = 0, []
@@ -75,6 +76,8 @@ def truncations(outputs):
         for uv in "UV":
             path = os.path.join(out, uv + "_velocity_truncations")
             if not readable(path):
+                if os.path.isfile(path):
+                    seg["unreadable"].append(uv)
                 continue
             per_pe, rec = {}, None
             for line in list(open(path, errors="replace")) + ["Time end"]:
@@ -151,7 +154,7 @@ def main(archive, dest, run_dir=None):
         logs += sorted(glob.glob(os.path.join(archive, sub, "*")), key=os.path.getmtime)[-2:]
     meta = os.path.join(archive, "metadata.yaml")
     configs = [os.path.join(run_dir, f) for f in CONFIG_FILES] if run_dir else []
-    with open(dest, "w") as f:
+    with open(dest + ".tmp", "w") as f:  # written whole, then renamed: never a half-written snapshot
         json.dump({"archive": archive, "outputs": len(outputs),
                    "latest_output": os.path.basename(outputs[-1]) if outputs else None,
                    "runs": runs,
@@ -162,6 +165,7 @@ def main(archive, dest, run_dir=None):
                    "work_truncations": truncations([os.path.join(run_dir, "work")]) if run_dir else None, "run_logs": run_dir_logs(run_dir) if run_dir else {},
                    "configs": {p: {"text": tail(p, lines=100000, nbytes=500000), "mtime": os.path.getmtime(p)}
                                for p in configs if readable(p)}}, f, indent=1)
+    os.replace(dest + ".tmp", dest)
 
 
 if __name__ == "__main__":

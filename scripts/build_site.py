@@ -28,6 +28,19 @@ def _sypd(run: dict) -> str:
         return ""
 
 
+def _date(value, n: int = 10) -> str:
+    """First n characters of a payu model date ('1958-01-01T00:00:00'), or '?' when payu didn't record one."""
+    return str(value)[:n] if value else "?"
+
+
+def _start(run: dict, runs: list):
+    """A run's model start date; when payu didn't record it, the previous run's finish date."""
+    if run.get("model_start") or not str(run.get("run")).isdigit():
+        return run.get("model_start")
+    prev = [r for r in runs if str(r.get("run")) == str(int(run["run"]) - 1) and r.get("model_finish")]
+    return prev[-1]["model_finish"] if prev else None
+
+
 def _when(ts) -> str:
     """A Unix time as Canberra local time, e.g. '2026-10-16 10:20 AEDT'."""
     return datetime.fromtimestamp(ts, timezone.utc).astimezone(CANBERRA).strftime("%Y-%m-%d %H:%M %Z") if ts else ""
@@ -166,23 +179,46 @@ def truncation_section(st: dict, work: bool = False) -> list:
         return md + ["✅ No velocity truncations so far in this run (`work/ocean.stats`).\n"]
     if not total:
         return md + [f"✅ No velocity truncations: the Truncs column of `ocean.stats` is zero in all {len(segs)} output folders.\n"]
-    periods = {f"output{int(r['run']):03d}": f"{r['model_start'][:7]} → {r['model_finish'][:7]}"
-               for r in st.get("runs", []) if r.get("run") is not None and r.get("model_finish")}
+    runs = st.get("runs", [])
+    periods = {f"output{int(r['run']):03d}": f"{_date(_start(r, runs), 7)} → {_date(r.get('model_finish'), 7)}"
+               for r in runs if str(r.get("run")).isdigit() and r.get("model_finish")}
     where = ("so far in this run (the Truncs column of `work/ocean.stats`)" if work else
              f"in {len(hit)} of {len(segs)} output folders (the Truncs column of each `outputNNN/ocean.stats`)")
     md += [f"⚠️ MOM6 truncated velocities **{total:,}** times {where}. MOM6 truncates a velocity when its CFL number "
            "exceeds 0.5, and aborts a run after `MAXTRUNC` (10,000 by default) truncations. "
            f"See [MOM6 velocity truncations]({TIPS}) for how to read the records, and "
-           f"[Examine_truncation_data.ipynb]({RECIPE}) for mapping them.\n",
-           "| Output folder | Model period | Truncations | Max CFL | Records in U / V files | PEs at the record cap |",
-           "|---|---|---:|---:|---|---|"]
-    for s in segs:
-        if work:
-            md[-2:] = []  # one folder: the summary sentence says it all
-            break
+           f"[Examine_truncation_data.ipynb]({RECIPE}) for mapping them.\n"]
+    if not work:  # one row per output folder that had truncations
+        md += ["*Location records* are the detailed records MOM6 also writes, one per truncation, to "
+               "`U_velocity_truncations` (zonal velocity) and `V_velocity_truncations` (meridional velocity); the "
+               "location table below is built from them. MOM6 writes at most 50 per PE per run, so there are usually "
+               "fewer of them than truncations; – means no file of that kind.\n",
+               "| Output folder | Model period | Truncations | Max CFL | Location records (U / V) | PEs at the record cap |",
+               "|---|---|---:|---:|---|---|"]
+    for s in ([] if work else hit):
         rec = " / ".join(str(s["records"].get(uv, "–")) for uv in "UV") if s["records"] else "–"
+        if s["truncs"] and not s["records"]:
+            rec = "⚠️ files unreadable" if s.get("unreadable") else "⚠️ no files"
         md.append(f"| {s['output']} | {periods.get(s['output'], '')} | {s['truncs']:,} | "
-                  f"{'–' if s['max_cfl'] is None else format(s['max_cfl'], '.2f')} | {rec} | {', '.join(map(str, s['capped_pes'])) or '–'} |")
+                  f"{'–' if s['max_cfl'] is None else format(s['max_cfl'], '.2f')} | {rec} | {', '.join(map(str, sorted(set(s['capped_pes'])))) or '–'} |")
+    if not work and len(hit) < len(segs):
+        md.append(f"\nThe other {len(segs) - len(hit)} output folders had no truncations.\n")
+    no_files = [s for s in hit if not s["records"]]
+    if no_files:
+        which = ("this run" if work else
+                 f"the only output folder with truncations ({_spans([s['output'] for s in no_files])})"
+                 if len(hit) == 1 else
+                 f"every output folder with truncations ({_spans([s['output'] for s in no_files])})"
+                 if len(no_files) == len(hit) else
+                 f"{len(no_files)} of the {len(hit)} output folders with truncations "
+                 f"({_spans([s['output'] for s in no_files])})")
+        md += ["", f"⚠️ `ocean.stats` reports truncations in {which}, but there are no readable "
+               "`U_velocity_truncations` / `V_velocity_truncations` files there, so where those truncations happened "
+               "can't be shown. MOM6 only writes these files when `U_TRUNC_FILE` and `V_TRUNC_FILE` are set in "
+               "`MOM_input` (both default to empty); otherwise they may not have been copied to the archive, or "
+               "they belong to someone else and can't be read.\n"]
+    if not t.get("boxes"):
+        return md
     md += ["", "**Where MOM6 truncates** (1° boxes, most records first; from the `U_velocity_truncations` and "
            "`V_velocity_truncations` files):\n",
            "| Location | Records | Grid cells | Seen in output | Velocity | Layers | Max speed (m/s) | Max CFL "
@@ -202,6 +238,13 @@ def truncation_section(st: dict, work: bool = False) -> list:
 
 def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     """Markdown for an experiment's run-status page, from gadi/run_status.py's snapshot."""
+    if st.get("no_snapshot"):  # nothing was read from Gadi: say so, rather than showing zeros
+        return "\n".join([f"# {e}\n"] + ([f"*{st['description']}*\n"] if st.get("description") else []) + [
+            "⚠️ **No status snapshot for this experiment.** The nightly job couldn't read this run's records on "
+            f"Gadi this time (archive folder `{st['no_snapshot']}`), so its run status, logs, configuration and "
+            "truncation sections are missing. They will appear after the next nightly run that reads them; if "
+            "this persists, check the folder exists and is readable, and see the Submit step's log.\n",
+            f"**Notebooks:** {nb_links or 'none yet'}\n"])
     runs, archive, run_dir = st.get("runs", []), st.get("archive", "?"), st.get("run_dir")
     done = [r for r in runs if r.get("model_finish")]
     emoji, sentence = health(st)
@@ -224,7 +267,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
                              lang=LEXERS.get(os.path.basename(path), "text"), opts='linenums="1"')
     md += ["## Archive folder: completed runs\n", f"Read from the payu archive folder `{archive}`.\n",
            f"- **Output folders:** {st.get('outputs', 0)} (latest `{st.get('latest_output')}`)",
-           f"- **Model date reached:** {done[-1]['model_finish'][:10] if done else 'unknown'}",
+           f"- **Model date reached:** {_date(done[-1]['model_finish']) if done else 'unknown'}",
            f"- **Runs recorded by payu:** {len(runs)}, of which failed: {sum(1 for r in runs if r.get('status') not in (0, None))}", ""]
     if sypd_png:
         md += ["### Model throughput\n", "Simulated years per day, made by `plot_sypd.py` from the "
@@ -235,7 +278,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
                "| Run | PBS job | Result | Model period | Wall time (h) | SYPD | Record last modified |",
                "|---|---|---|---|---|---|---|"]
         for r in runs[-10:][::-1]:
-            period = f"{(r.get('model_start') or '?')[:10]} → {(r.get('model_finish') or '?')[:10]}"
+            period = f"{_date(_start(r, runs))} → {_date(r.get('model_finish'))}"
             hours = f"{r['seconds'] / 3600:.1f}" if r.get("seconds") else ""
             md.append(f"| {r.get('run')} | {r.get('job_id') or ''} | {_result(r)} | {period} | {hours} | {_sypd(r)} | {_when(r.get('mtime'))} |")
         md.append("")
@@ -245,6 +288,16 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
         md += _block(f"{archive}/metadata.yaml", st["metadata"], kind="info", lang="yaml")
     md += truncation_section(st)
     return "\n".join(md)
+
+
+def _snapshot(path: Path) -> dict:
+    """An experiment's run_status.py snapshot, or {} if it's missing, empty or unreadable."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        if path.exists():
+            print(f"::warning::{path.name}: status snapshot is empty or unreadable; showing the page without it")
+        return {}
 
 
 def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
@@ -282,14 +335,17 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
     shown = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for nb in ok)
     broke = "<br>".join(f"[{nb}]({e}/{nb}/index.md)" for nb in failed)
     links = ", ".join([f"[{nb}]({nb}/index.md)" for nb in ok] + [f"❌ [{nb}]({nb}/index.md)" for nb in failed])
-    st = json.loads((STATUS / f"{e}.json").read_text()) if (STATUS / f"{e}.json").exists() else {}
+    st = _snapshot(STATUS / f"{e}.json")
+    if not st:
+        st["no_snapshot"] = entry["archive"] if isinstance(entry, dict) else entry  # as listed in experiments.yml
     st["description"] = description(entry, st)
     (docs / "live" / e).mkdir(parents=True, exist_ok=True)
     if (src / "sypd.png").exists():
         shutil.copy2(src / "sypd.png", docs / "live" / e)
     (docs / "live" / e / "index.md").write_text(status_page(e, st, links, (src / "sypd.png").exists()))
     done = [r for r in st.get("runs", []) if r.get("model_finish")]
-    reached = f"{health(st)[0]} {done[-1]['model_finish'][:10] if done else ''}" if st.get("runs") else "–"
+    reached = ("⚠️ no status snapshot" if st.get("no_snapshot") else
+               f"{health(st)[0]} {_date(done[-1]['model_finish']) if done else ''}" if st.get("runs") else "–")
     return ({e: [f"live/{e}/index.md", *pages]},
             f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |")
 
