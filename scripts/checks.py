@@ -198,3 +198,31 @@ def throughput(archive: str) -> str:
            "    # 'ypd' (the second-last word), adds them up and counts them, then prints the average at the end.",
            """    awk -v name="$(basename "$o")" '/Model Date:/ && /ypd/ {count++; total += $(NF-1)} END {if (count) printf "%s: %d rate lines, mean %.2f ypd\\n", name, count, total/count}' "$o/log/med.log\"""",
            "done"])
+
+
+def settings_changes(run_dir: str) -> str:
+    """The current build, the run count, and every edit to the tracked settings files since the first run commit."""
+    files = "config.yaml MOM_input MOM_override nuopc.runconfig ice_in"
+    return "\n".join(
+        _note("WHAT THIS DOES: checks the 'Settings changed during this run' section. It prints the current build from "
+              "config.yaml, counts payu's run commits, and lists every edit made to the settings files since the first run, "
+              "using git (the history of changes kept in the control directory). In the list of edits, a line starting with "
+              "'-' was removed and a line starting with '+' was added.")
+        + _vars(run_dir=run_dir)
+        + ["", "# Step 1: the current build: the 'model' and 'exe' lines of config.yaml, and its 'modules:' block",
+           "# (sed prints the lines from 'modules:' down to the next empty line)",
+           "grep -E '^(model|exe):' \"$R/config.yaml\"",
+           "sed -n '/^modules:/,/^$/p' \"$R/config.yaml\"",
+           "",
+           "# Step 2: payu makes one git commit for every run, with a message that ends in 'Run <number>'.",
+           "# This counts them: it is the number of completed runs on the page.",
+           "git -C \"$R\" log --first-parent --format=%s | grep -c ': Run [0-9]*$'",
+           "",
+           "# Step 3: find the first run commit (the chart starts there)",
+           "FIRST=$(git -C \"$R\" log --first-parent --reverse --format='%H %s' | grep -m1 ': Run [0-9]*$' | cut -d' ' -f1)",
+           "",
+           "# Step 4: every edit to the settings files after that, oldest first. Each edit starts with a line like",
+           "# '=== <commit> <date> <message>', followed by what changed.",
+           f"git -C \"$R\" log -p --first-parent --reverse --format='=== %h %cI %s' \"$FIRST\"..HEAD -- {files}",
+           "",
+           "# If git says 'dubious ownership', the folder belongs to someone else: add  -c safe.directory=\"$R\"  after the word git."])

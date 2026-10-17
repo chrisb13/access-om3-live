@@ -754,7 +754,7 @@ def settings_section(st: dict, e: str = "") -> list:
         md += [f'??? note "Housekeeping: {len(hidden)} changes to {len({c["key"] for c in hidden})} settings in '
                f'{len({c["sha"] for c in hidden})} commits (job setup, paths, diagnostic output)"']
         md += ["    " + line for line in _md_table(hidden)] + [""]
-    return md
+    return md + _check("the build and every edit listed here", checks.settings_changes(st["run_dir"]))
 
 
 def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
