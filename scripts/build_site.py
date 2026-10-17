@@ -47,6 +47,61 @@ def _start(run: dict, runs: list):
     return prev[-1]["model_finish"] if prev else None
 
 
+def _progress(runs: list) -> tuple:
+    """(model years completed, average SYPD) from an experiment's completed payu runs; None where they can't be worked out.
+    A run whose start payu didn't record (usually the first) counts as the median length of the others."""
+    import statistics
+
+    days, known = [], []
+    for r in runs:
+        if r.get("status") != 0 or not r.get("model_finish"):
+            continue
+        start = _start(r, runs)
+        try:
+            d = (datetime.fromisoformat(r["model_finish"]) - datetime.fromisoformat(start)).days if start else None
+        except ValueError:
+            d = None
+        days.append(d)
+        if d is not None and r.get("seconds"):
+            known.append((d, r["seconds"]))
+    if not days:
+        return None, None
+    typical = statistics.median([d for d in days if d is not None] or [0])
+    years = sum(d if d is not None else typical for d in days) / 365.25
+    sypd = sum(d for d, _ in known) / 365.25 / (sum(s for _, s in known) / 86400) if known else None
+    return years, sypd
+
+
+def monitor_plot(series: dict, out: Path) -> bool:
+    """Draw each experiment's SYPD for every completed run against the model year it reached; False if there is nothing to draw."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("::warning::matplotlib is not installed, so the throughput plot is left out")
+        return False
+    fig, ax = plt.subplots(figsize=(10, 4.2), facecolor="white")
+    for name, runs in series.items():
+        pts = []
+        for r in runs:
+            if r.get("status") == 0 and r.get("model_finish") and _sypd(r):
+                d = datetime.fromisoformat(r["model_finish"])
+                pts.append((d.year + (d.timetuple().tm_yday - 1) / 365.25, float(_sypd(r))))
+        if pts:
+            ax.plot(*zip(*sorted(pts)), marker="o", ms=3, lw=1.2, label=name)
+    if not ax.lines:
+        plt.close(fig)
+        return False
+    ax.set(xlabel="model year reached", ylabel="simulated years per day (SYPD)")
+    ax.set_ylim(bottom=0)
+    ax.grid(alpha=0.3)
+    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    return True
+
+
 def _when(ts) -> str:
     """A Unix time as Canberra local time, e.g. '2026-10-16 10:20 AEDT'."""
     return datetime.fromtimestamp(ts, timezone.utc).astimezone(CANBERRA).strftime("%Y-%m-%d %H:%M %Z") if ts else ""
@@ -882,8 +937,11 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
                                                             (src / "sypd.png").exists()))
     done = [r for r in st.get("runs", []) if r.get("model_finish")]
     latest = max((r.get("mtime") or 0 for r in st.get("runs", [])), default=0)  # when payu last recorded a run
+    years, avg = _progress(st.get("runs", []))
+    progress = (f" ({years:.0f} years complete" if years and years >= 10 else f" ({years:.1f} years complete" if years else "") + (
+        f", avg {avg:.1f} SYPD" if years and avg else "") + (")" if years else "")
     reached = ("⚠️ no status snapshot" if st.get("no_snapshot") else
-               f"{health(st)[0]} {_date(done[-1]['model_finish']) if done else ''}<br>{_when(latest)}"
+               f"{health(st)[0]} {_date(done[-1]['model_finish']) if done else ''}{progress}<br>{_when(latest)}"
                if st.get("runs") else "–")
     return ({e: [f"live/{e}/index.md", *pages]},
             f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |",
@@ -982,6 +1040,13 @@ def main(summary_md: str) -> None:
             live_nav.append(nav)
 
     (docs / "live").mkdir(exist_ok=True)
+    names = [Path(x["archive"] if isinstance(x, dict) else x).name for x in cfg["experiments"]]
+    series = {n: _snapshot(STATUS / f"{n}.json").get("runs", []) for n in names if n != "archive"}
+    plot = ("\n## Throughput of all runs\n\nSimulated years per day (SYPD) of every completed run, from payu's job records, "
+            "against the model year it reached: one line per experiment in the table above.\n\n"
+            "![Simulated years per day, all experiments](sypd_all.png)\n"
+            if monitor_plot(series, docs / "live" / "sypd_all.png") else "")
+    help_text = (ROOT / "pages" / "monitor_help.md").read_text().replace("{repo}", REPO).replace("{notebooks}", ", ".join(cfg["notebooks"]))
     (docs / "live" / "index.md").write_text(
         # Hide the empty "On this page" column so the table gets the room (as the Experiments page does).
         "<style>.md-sidebar--secondary:not([hidden]) { display: none }</style>\n\n"
@@ -989,10 +1054,9 @@ def main(summary_md: str) -> None:
         "when it has new output. Click an experiment for its run status. Times are Canberra time.\n\n"
         "| Experiment | Description | Latest submission, model date reached | Notebooks last run | Notebooks shown "
         "| Failed |\n|---|---|---|---|---|---|\n"
-        + "\n".join(rows) + "\n")
+        + "\n".join(rows) + "\n" + plot + "\n" + help_text)
 
     if os.environ.get("GITHUB_STEP_SUMMARY"):  # shown at the top of the workflow run's page
-        names = [Path(x["archive"] if isinstance(x, dict) else x).name for x in cfg["experiments"]]
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write(run_summary([n for n in names if n != "archive"]))
     nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Evaluation Summary": "evaluation-summary.md"}]
