@@ -32,8 +32,10 @@ experiments:
   - archive: /scratch/x77/aek156/access-om3/archive/MC_25km_era_iaf+wombatlite-test5-era-8a51ed1d
     run_dir: /home/156/aek156/payu/MC_25km_era_iaf+wombatlite
     description: 25km ERA IAF test 5 (stopped)
-  - archive: /g/data/zv30/non-cmip/ACCESS-CM3/cm3-run-27-07-2026-PD-control
+  - archive: /g/data/zv30/non-cmip/ACCESS-CM3/cm3-run-27-07-2026-PD-control/cm3-datastore/cm3-datastore.json
     description: CM3 present day control run. This run uses the GC5-central UM configuration, CMIP6 inputs, and includes several polar and tripolar bugfixes.
+  - archive: /g/data/zv30/non-cmip/ACCESS-CM3/cm3-run-27-07-2026-PI-control/cm3-datastore/cm3-datastore.json
+    description: CM3 pre-industrial control run. This run uses the GC5-central UM configuration, CMIP6 inputs, and includes several polar and tripolar bugfixes.
 
 # Notebooks run for every experiment, from this access-om3-paper-1 commit (a full hash, so
 # nothing changes until it is updated here): PR #137's head, rebased onto main on 2026-10-17.
