@@ -16,6 +16,8 @@ import json
 
 import yaml
 
+import checks
+
 ROOT = Path(__file__).resolve().parent.parent
 CONTENT, THEME, BUILD, STATUS = ROOT / "content", ROOT / "theme" / "documentation", ROOT / "build", ROOT / "status"
 CONFIGS_SITE = "https://access-om3-configs.access-hive.org.au/latest/"
@@ -119,17 +121,28 @@ def _block(title: str, text: str, kind: str = "note", lang: str = "text", opts: 
             f"    {fence}", ""]
 
 
+def _check(title: str, code: str, where: str = "on Gadi") -> list:
+    """A collapsed block with a snippet to re-check a statement (the code block gets a copy button)."""
+    return _block(f"Check this {where}: {title}", code, kind="tip", lang="bash")
+
+
 # Syntax highlighting for the run directory's configuration files (Fortran for namelist-style files)
 LEXERS = {"config.yaml": "yaml", "MOM_input": "fortran", "ice_in": "fortran",
           "nuopc.runconfig": "ini", "nuopc.runseq": "ini"}
 
 
+def _paths(logs: dict) -> list:
+    """The log paths, in the order the page shows them."""
+    return [path for path, _ in sorted(logs.items(), key=_log_order)]
+
+
 def _logs(logs: dict) -> list:
-    """Collapsible blocks with the last lines of each log, titled with its full Gadi path and modification time."""
+    """Collapsible blocks with the last lines of each log, titled with its full Gadi path and modification time,
+    and a check of those times and lines."""
     md = []
     for path, log in sorted(logs.items(), key=_log_order):
         md += _block(f"{path} (last lines; modified {_when(log['mtime'])})", log["text"])
-    return md
+    return md + _check("when these logs were written, and their last lines", checks.log_files(_paths(logs))) if md else md
 
 
 def description(entry, st: dict) -> tuple:
@@ -197,6 +210,16 @@ def _spans(names: list) -> str:
         else:
             out.append([n, n])
     return ", ".join(f"{a:03d}" + (f"–{b:03d}" if b > a else "") for a, b in out)
+
+
+def truncation_section(st: dict, work: bool = False) -> list:
+    """'Truncation locations' with a check for it, if there is anything to show."""
+    md = _truncation_text(st, work)
+    t = st.get("work_truncations" if work else "truncations") or {}
+    example = next((f'"$R"/work/{uv}_velocity_truncations' if work else f'"$A"/{s["output"]}/{uv}_velocity_truncations'
+                    for s in t.get("segments", []) for uv, n in s["records"].items() if n), None)
+    return md + _check("the truncation counts, locations and settings",
+                       checks.truncations(st.get("archive"), st.get("run_dir"), work, example)) if md else md
 
 
 def _truncation_text(st: dict, work: bool = False) -> list:
@@ -787,7 +810,7 @@ def settings_section(st: dict, e: str = "") -> list:
         md += [f'??? note "Housekeeping: {len(hidden)} changes to {len({c["key"] for c in hidden})} settings in '
                f'{len({c["sha"] for c in hidden})} commits (job setup, paths, diagnostic output)"']
         md += ["    " + line for line in _md_table(hidden)] + [""]
-    return md
+    return md + _check("the build and every edit listed here", checks.settings_changes(st["run_dir"]))
 
 
 def _timeline_narrow(shown: list, runs: list, restarts: list, t0: datetime, t1: datetime, boundary: datetime,
@@ -895,7 +918,7 @@ def friends_section(st: dict) -> list:
     md = ["## Where are my friends?\n"]
     if not f.get("found"):
         return md + ["😢 **Couldn't find any of its friends!** This run's control directory shares no history with "
-                     f"[access-om3-configs]({CONFIGS_URL}).\n"]
+                     f"[access-om3-configs]({CONFIGS_URL}).\n"] + _check("that nothing is shared", checks.friends(run_dir))
     commit = (_ref_link("tree", f["tag"]["name"]) if f.get("tag") and f["tag"]["behind"] == 0 else _ref_link("commit", f["short"]))
     md += [f"How this run's configuration relates to [access-om3-configs]({CONFIGS_URL}): the newest commit that the control "
            f"directory's history (latest commit `{f['run_head']}`) shares with the configurations repository.\n",
@@ -912,7 +935,7 @@ def friends_section(st: dict) -> list:
         md += _block(f"Diff: this run vs {label} @ {f['short']}", f["diff"]["text"], kind="example", lang="diff")
     if f.get("tag") and f["tag"]["diff"]["text"] and f["tag"]["behind"]:
         md += _block(f"Diff: this run vs tag {f['tag']['name']}", f["tag"]["diff"]["text"], kind="example", lang="diff")
-    return md
+    return md + _check("the closest shared commit and tag", checks.friends(run_dir, f["short"]))
 
 
 def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
@@ -944,21 +967,26 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
         if dates:
             md.append(f"**Latest model date in `work/log/med.log`:** {dates[-1].split('Model Date:')[1].split()[0]}"
                       f" (rate {dates[-1].split('rate =')[-1].strip()})\n")
+            md += _check("the latest model date", checks.model_date(run_dir))
         md += ["### Log files\n"] + (_logs(st["run_logs"]) or ["No logs found there.\n"])
-        md += _truncation_text(st, work=True)
+        md += truncation_section(st, work=True)
         if st.get("configs"):
             md.append("### Configuration files\n")
             for path, cfg in st["configs"].items():
                 md += _block(f"{path} (modified {_when(cfg['mtime'])})", cfg["text"], kind="info",
                              lang=LEXERS.get(os.path.basename(path), "text"), opts='linenums="1"')
+            md += _check("when these files were last modified",
+                         checks.config_files(run_dir, [os.path.basename(p) for p in st["configs"]]))
     md += ["## Archive folder: completed runs\n", f"Read from the payu archive folder `{archive}`.\n",
            f"- **Output folders:** {st.get('outputs', 0)} (latest `{st.get('latest_output')}`)",
            f"- **Model date reached:** {_date(done[-1]['model_finish']) if done else 'unknown'}",
            f"- **Runs recorded by payu:** {len(runs)}, of which failed: {sum(1 for r in runs if r.get('status') not in (0, None))}", ""]
+    md += _check("these counts", checks.archive_counts(archive))
     if sypd_png:
         md += ["### Model throughput\n", "Simulated years per day, made by `plot_sypd.py` from the "
                f"`outputNNN/log/med.log` files of the completed submissions in `{archive}`.\n",
                "![Simulated years per day](sypd.png)\n"]
+        md += _check("the rate in each output's med.log", checks.throughput(archive))
     if runs:
         md += ["### Recent runs\n", f"From payu's job records in `{archive}/payu_jobs`; times are Canberra time.\n",
                "| Run | PBS job | Result | Model period | Wall time (h) | SYPD | Record last modified |",
@@ -968,11 +996,12 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
             hours = f"{r['seconds'] / 3600:.1f}" if r.get("seconds") else ""
             md.append(f"| {r.get('run')} | {r.get('job_id') or ''} | {_result(r)} | {period} | {hours} | {_sypd(r)} | {_when(r.get('mtime'))} |")
         md.append("")
+        md += _check("this table", checks.recent_runs(archive))
     if st.get("logs"):
         md += ["### Latest logs in the archive folder\n"] + _logs(st["logs"])
     if st.get("metadata"):
         md += _block(f"{archive}/metadata.yaml", st["metadata"], kind="info", lang="yaml")
-    md += _truncation_text(st)
+    md += truncation_section(st)
     md += settings_section(st, e)
     md += friends_section(st)
     return "\n".join(md)
