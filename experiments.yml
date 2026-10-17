@@ -4,7 +4,7 @@
 #              payu archive on /scratch or its synced copy on /g/data. Its folder name is the
 #              experiment's name on the site, so it must be unique.
 #   run_dir    (optional) the payu control directory, for the current or crashed run's logs.
-#   notebooks  (optional) extra notebooks for this experiment, on top of `notebooks` below.
+#   notebooks  (optional) the notebooks to run for this experiment, instead of `notebooks` below.
 #   description (optional) one line for the OM3 Monitor table and the status page; without
 #              it, the first line of the description in the run's metadata.yaml is used.
 # An entry with just the archive folder can be written as a plain path:
@@ -32,9 +32,10 @@ experiments:
     run_dir: /home/156/aek156/payu/MC_25km_era_iaf+wombatlite
     description: 25km ERA IAF test 5 (stopped)
 
-# Notebooks run for every experiment, from this access-om3-paper-1 git ref.
-# (pull/137/head until PR #137, which adds ocean_stats, is merged; then main.)
-paper_ref: pull/137/head
+# Notebooks run for every experiment, from this access-om3-paper-1 commit (a full hash, so
+# nothing changes until it is updated here): PR #137's head, rebased onto main on 2026-10-17.
+# Once PR #137 is merged, use the merge commit on main.
+paper_ref: 5d75f994fbd240e00250a8148b9f18057b0e986f
 notebooks:
   - ocean_stats
   - timeseries
@@ -45,6 +46,6 @@ notebooks:
 project: tm70
 # What the notebooks always need: xp65 (conda environment) and ik11 (the ACCESS-OM2 run
 # that timeseries compares against). Each run's own /g/data or /scratch project is added
-# automatically; add any project that extra notebooks read from.
+# automatically; add any project that an experiment's own notebooks read from.
 storage: gdata/xp65+gdata/ik11
 conda_module: conda/analysis3-26.08

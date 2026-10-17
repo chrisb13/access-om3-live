@@ -18,7 +18,7 @@ the folder's project is added to the PBS storage flags automatically.
 
 | File | What it does |
 |---|---|
-| `.github/workflows/live.yml` | Midnight (or manual) run: submit a Gadi job per changed experiment, copy finished results back, build and publish the site; the noon run only publishes |
+| `.github/workflows/live.yml` | Midnight (or manual) run: submit a Gadi job per changed experiment, wait for them (up to 5 h 20 min), copy the results back, build and publish the site |
 | `gadi/submit.sh` | On a Gadi login node: update the paper repo, pick runs with new `.nc` output, `qsub` the job |
 | `gadi/mkfigs_live.sh` | The PBS job (one per experiment): builds a temporary datastore, runs `plot_sypd.py` and `mkfigs.run` (as `mkfigs.sh` does), then copies the results to `results/` |
 | `gadi/run_status.py` | On the login node: snapshot each run's payu records (job history, latest log tails) for its status page |

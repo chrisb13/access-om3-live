@@ -354,10 +354,13 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
     (docs / "live" / e / "index.md").write_text(status_page(e, st, links + (f"\n\n{job_note}" if job_note else ""),
                                                             (src / "sypd.png").exists()))
     done = [r for r in st.get("runs", []) if r.get("model_finish")]
+    latest = max((r.get("mtime") or 0 for r in st.get("runs", [])), default=0)  # when payu last recorded a run
     reached = ("⚠️ no status snapshot" if st.get("no_snapshot") else
-               f"{health(st)[0]} {_date(done[-1]['model_finish']) if done else ''}" if st.get("runs") else "–")
+               f"{health(st)[0]} {_date(done[-1]['model_finish']) if done else ''}<br>{_when(latest)}"
+               if st.get("runs") else "–")
     return ({e: [f"live/{e}/index.md", *pages]},
-            f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |")
+            f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |",
+            latest)
 
 
 def _valid_json(path: Path) -> bool:
@@ -367,6 +370,41 @@ def _valid_json(path: Path) -> bool:
         return True
     except (OSError, ValueError):
         return False
+
+
+def notebook_times(log: Path) -> list:
+    """[(notebook, 'OK' / 'FAILED' / "didn't finish", minutes or None)] from mkfigs' mkfigs_run.log."""
+    started, out = {}, []
+    for line in log.read_text(errors="replace").splitlines() if log.exists() else []:
+        m = re.match(r"(\S+ \S+?),\d+ \S+\s+(START|OK|FAILED)\s+(\S+)", line)
+        if not m:
+            continue
+        t = datetime.strptime(m[1], "%Y-%m-%d %H:%M:%S")
+        if m[2] == "START":
+            started[m[3]] = t
+        elif m[3] in started:
+            out.append((m[3], m[2], (t - started.pop(m[3])).total_seconds() / 60))
+    return out + [(nb, "didn't finish", None) for nb in started]
+
+
+def run_summary(experiments: list) -> str:
+    """Markdown for the GitHub Actions run summary: per experiment, what this run did, its last notebook job
+    and how its notebooks went (from status/<ENAME>.job.json and the job's mkfigs_run.log)."""
+    rows = ["### Notebook jobs\n", "| Experiment | This run | Last job: exit, walltime, memory | Notebooks: OK / failed / "
+            "didn't finish | Slowest notebook |", "|---|---|---|---|---|"]
+    for e in experiments:
+        job, nbs = _snapshot(STATUS / f"{e}.job.json"), notebook_times(CONTENT / e / "mkmd" / "mkfigs_run.log")
+        last = job.get("last") or {}
+        mem = re.match(r"(\d+)kb$", last.get("mem") or "")
+        last["mem"] = f"{int(mem[1]) / 1024 ** 2:.0f} GB" if mem else last.get("mem")  # PBS reports kilobytes
+        res = ", ".join(f"{k} {last[k]}" for k in ("exit", "walltime", "mem") if last.get(k)) or "–"
+        if last.get("job"):
+            res = f"{last['job']}<br>{res}"
+        counts = " / ".join(str(sum(r == k for _, r, _ in nbs)) for k in ("OK", "FAILED", "didn't finish")) if nbs else "–"
+        timed = sorted((t, nb) for nb, _, t in nbs if t is not None)
+        slow = f"{timed[-1][1]} ({timed[-1][0]:.1f} min)" if timed else "–"
+        rows.append(f"| {e} | {job.get('decision', '–')} | {res} | {counts} | {slow} |")
+    return "\n".join(rows) + "\n\nExit status 0 means the job finished; -29 means it ran out of walltime.\n"
 
 
 def main(summary_md: str) -> None:
@@ -390,15 +428,16 @@ def main(summary_md: str) -> None:
         f"[Experiments]({CONFIGS_SITE}Experiments/) page of the access-om3-configs documentation.\n"), 1))
 
     live_nav, rows = ["live/index.md"], []
+    listed = []  # (latest payu record time, menu entry, table row) per experiment
     for entry in cfg["experiments"]:
         path = entry["archive"] if isinstance(entry, dict) else entry
-        notebooks = cfg["notebooks"] + (entry.get("notebooks", []) if isinstance(entry, dict) else [])
+        notebooks = (entry.get("notebooks") if isinstance(entry, dict) else None) or cfg["notebooks"]  # own list replaces
         e = Path(path).name  # ENAME = name of the archive folder
         if e == "archive":  # submit.sh skips these: the link's target folder must be listed instead
-            rows.append(f"| `{path}` | | ⚠️ not monitored: list the folder this `archive` link points to | | | |")
+            listed.append((-1, None, f"| `{path}` | | ⚠️ not monitored: list the folder this `archive` link points to | | | |"))
             continue
         try:
-            nav, row = experiment_pages(e, entry, notebooks, docs)
+            nav, row, latest = experiment_pages(e, entry, notebooks, docs)
         except Exception as err:  # one bad experiment must not take the whole site down
             print(f"::error::{e}: its pages could not be built: {err!r}")
             traceback.print_exc()
@@ -406,9 +445,14 @@ def main(summary_md: str) -> None:
             (docs / "live" / e).mkdir(parents=True)
             (docs / "live" / e / "index.md").write_text(
                 f"# {e}\n\n⚠️ This experiment's pages could not be built:\n\n```text\n{traceback.format_exc()}```\n")
-            nav, row = {e: [f"live/{e}/index.md"]}, f"| [{e}]({e}/index.md) | | ⚠️ pages could not be built (see its page) | | | |"
-        live_nav.append(nav)
+            nav, latest = {e: [f"live/{e}/index.md"]}, 0
+            row = f"| [{e}]({e}/index.md) | | ⚠️ pages could not be built (see its page) | | | |"
+        listed.append((latest, nav, row))
+    # Most recently active run first (latest payu record), in the table and the menu
+    for latest, nav, row in sorted(listed, key=lambda x: -x[0]):
         rows.append(row)
+        if nav:
+            live_nav.append(nav)
 
     (docs / "live").mkdir(exist_ok=True)
     (docs / "live" / "index.md").write_text(
@@ -420,6 +464,10 @@ def main(summary_md: str) -> None:
         "| Failed |\n|---|---|---|---|---|---|\n"
         + "\n".join(rows) + "\n")
 
+    if os.environ.get("GITHUB_STEP_SUMMARY"):  # shown at the top of the workflow run's page
+        names = [Path(x["archive"] if isinstance(x, dict) else x).name for x in cfg["experiments"]]
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            f.write(run_summary([n for n in names if n != "archive"]))
     nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Evaluation Summary": "evaluation-summary.md"}]
     (BUILD / "mkdocs.yml").write_text(yaml.safe_dump({"INHERIT": "../mkdocs.yml", "nav": nav}, sort_keys=False))
 

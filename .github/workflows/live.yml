@@ -2,8 +2,7 @@ name: Live evaluation site
 
 on:
   schedule:
-    - cron: '0 14 * * *'   # midnight AEST: submit jobs for experiments with new output, and publish
-    - cron: '0 2 * * *'    # noon AEST: publish only (results of jobs that finished overnight)
+    - cron: '0 14 * * *'   # midnight AEST
   workflow_dispatch:
     inputs:
       force:
@@ -23,7 +22,7 @@ concurrency:
 jobs:
   live:
     runs-on: ubuntu-latest
-    timeout-minutes: 30   # the PBS jobs run on their own; this only submits them and publishes
+    timeout-minutes: 355   # GitHub's limit is 6 h; the wait below stops at 5 h 20 min
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -73,26 +72,48 @@ jobs:
         id: submit
         env:
           FORCE: ${{ inputs.force || false }}
-          MODE: ${{ github.event.schedule == '0 2 * * *' && 'collect' || 'submit' }}
         run: |
           set -euo pipefail
           python3 -c 'import shlex, yaml
           c = yaml.safe_load(open("experiments.yml"))
           ex = [x if isinstance(x, dict) else {"archive": x} for x in c.pop("experiments")]
           c["experiments"], c["run_dirs"] = [x["archive"] for x in ex], [x.get("run_dir", "") for x in ex]
-          c["extra_notebooks"] = [" ".join(x.get("notebooks", [])) for x in ex]
+          c["exp_notebooks"] = [" ".join(x.get("notebooks", [])) for x in ex]  # replaces `notebooks` when set
           for k, v in c.items():
               print(f"{k.upper()}=" + ("(" + " ".join(map(shlex.quote, v)) + ")" if isinstance(v, list) else shlex.quote(str(v))))' > config.sh
           ssh "$GADI" mkdir -p "$WORK"
           rsync -r gadi config.sh "$GADI:$WORK/"
-          ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA" "$FORCE" "$MODE" | tee -a "$GITHUB_OUTPUT"
+          ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA" "$FORCE" submit | tee -a "$GITHUB_OUTPUT"
+
+      - name: Wait for the PBS jobs
+        if: steps.submit.outputs.jobids != ''
+        env:
+          JOBIDS: ${{ steps.submit.outputs.jobids }}
+        # /etc/profile puts qstat on PATH (non-interactive SSH only gets /bin:/usr/bin). Jobs still
+        # running at the deadline are shown as re-running, and published by the next night's run.
+        run: |
+          deadline=$((SECONDS + 320 * 60)) left=$JOBIDS
+          while [ -n "$left" ]; do
+            # one line per check: each unfinished job's state (Q queued, R running) and walltime so far
+            states=$(ssh "$GADI" "source /etc/profile >/dev/null 2>&1; qstat -x $left" | awk 'NR > 2 {print $1, $5, $4}')
+            left=$(awk '$2 != "F" {print $1}' <<< "$states" | tr '\n' ' ' | sed 's/ *$//')
+            echo "$(date -u +%H:%MZ) waiting for $(wc -w <<< "$left") of $(wc -w <<< "$JOBIDS") jobs: $(awk '$2 != "F" {printf "%s (state %s, CPU time %s) ", $1, $2, $3}' <<< "$states")"
+            [ -n "$left" ] || break
+            if [ "$SECONDS" -ge "$deadline" ]; then echo "::notice::stopped waiting; jobs still running are published by the next run"; exit 0; fi
+            sleep 300
+          done
+
+      - name: Refresh run status after the jobs
+        id: refresh
+        run: ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA" false collect | tee -a "$GITHUB_OUTPUT"
 
       - name: Collect outputs and build site
-        if: steps.submit.outputs.rebuild == 'true'
+        if: steps.refresh.outputs.rebuild == 'true'
         run: |
           set -euo pipefail
           source config.sh
           mkdir -p content
+          echo "::group::Copy results and run status from Gadi"
           for e in "${EXPERIMENTS[@]}"; do
             e=$(basename "$e")   # ENAME = name of the archive folder
             rsync -a --include='mkmd/***' --include='*_rendered.ipynb' --include='sypd.png' --exclude='*' \
@@ -100,24 +121,27 @@ jobs:
               || echo "::warning::no outputs yet for $e"
           done
           rsync -a "$GADI:$WORK/status/" status/ || echo "::warning::no run status snapshots"
+          echo "::endgroup::"
           # Theme files from access-om3-paper-1, so the look stays in step with the paper site.
           git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ACCESS-Community-Hub/access-om3-paper-1.git theme
           git -C theme sparse-checkout set documentation/overrides documentation/docs/assets documentation/docs/css documentation/docs/fontello
-          python3 scripts/build_site.py Experiments.md
+          python3 scripts/build_site.py Experiments.md   # also writes the run summary table
+          echo "::group::Build the website (mkdocs)"
           mkdocs build -f build/mkdocs.yml -d site
+          echo "::endgroup::"
 
-      - if: steps.submit.outputs.rebuild == 'true'
+      - if: steps.refresh.outputs.rebuild == 'true'
         uses: actions/configure-pages@v6
 
-      - if: steps.submit.outputs.rebuild == 'true'
+      - if: steps.refresh.outputs.rebuild == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: build/site
 
-      - if: steps.submit.outputs.rebuild == 'true'
+      - if: steps.refresh.outputs.rebuild == 'true'
         id: deploy
         uses: actions/deploy-pages@v5
 
       - name: Record what is now published
-        if: steps.submit.outputs.rebuild == 'true'
+        if: steps.refresh.outputs.rebuild == 'true'
         run: ssh "$GADI" mv "$WORK/state/published.pending" "$WORK/state/published"

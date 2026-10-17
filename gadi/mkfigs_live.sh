@@ -22,10 +22,10 @@ module load "$CONDA_MODULE"
 
 PAPER="$WORK/access-om3-paper-1"
 export PYTHONPATH="$PAPER/external/access-model-mkfigs/src:${PYTHONPATH:-}"
-while IFS='=' read -r ENAME OUTDIR EXTRA; do
-    # The standard notebooks plus this experiment's own (EXTRA: space-separated, may be empty)
-    read -r -a extra <<< "$EXTRA"
-    printf -v MKFIGS_NOTEBOOKS '%s:' "${NOTEBOOKS[@]}" "${extra[@]}"
+while IFS='=' read -r ENAME OUTDIR NBS; do
+    # The notebooks for this experiment (space-separated): its own list, else the standard one
+    read -r -a nbs <<< "${NBS:-${NOTEBOOKS[*]}}"
+    printf -v MKFIGS_NOTEBOOKS '%s:' "${nbs[@]}"
     export MKFIGS_NOTEBOOKS="${MKFIGS_NOTEBOOKS%:}"
     # Temporary datastore in jobfs. Its folder must be named ENAME: mkfigs takes the
     # experiment name from the datastore's parent folder.

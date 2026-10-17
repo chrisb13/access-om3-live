@@ -1,6 +1,6 @@
 #!/bin/bash
 # Login-node step: update the paper checkout, snapshot each run's status, and qsub one
-# mkfigs_live.sh job per experiment with new output (unless MODE=collect).
+# mkfigs_live.sh job per experiment with new output (MODE=collect: snapshots and job states only).
 # Usage: submit.sh WORK_DIR SUMMARY_SHA FORCE [MODE]   (prints key=value lines for $GITHUB_OUTPUT)
 set -euo pipefail
 WORK=$1 SUMMARY_SHA=$2 FORCE=$3 MODE=${4:-submit}
@@ -13,6 +13,13 @@ mkdir -p "$STATE" "$WORK/logs" "$WORK/results" "$WORK/run_lists"
 
 running() {   # is PBS job $1 still queued or running?
     [ -n "$1" ] && qstat -f "$1" 2>/dev/null | grep -qE 'job_state = [QRHE]'
+}
+jobinfo() {   # exit status and resources used by finished PBS job $1, as JSON (empty fields if PBS has forgotten it)
+    qstat -xf "$1" 2>/dev/null | awk -F' = ' -v j="$1" '/Exit_status/ {x=$2} /resources_used.walltime/ {w=$2}
+        /resources_used.mem =/ {m=$2} END {printf "{\"job\": \"%s\", \"exit\": \"%s\", \"walltime\": \"%s\", \"mem\": \"%s\"}", j, x, w, m}'
+}
+note() {   # $1: experiment, $2: what this run did with it; for the workflow log and its run summary
+    echo "$1: $2" >&2
 }
 
 # Compute nodes have no internet, so fetch the notebooks here.
@@ -35,12 +42,16 @@ rm -rf "$WORK/status" && mkdir -p "$WORK/status"   # one run_status.py snapshot 
 jobids=()
 for i in "${!EXPERIMENTS[@]}"; do
     path=${EXPERIMENTS[$i]} run_dir=${RUN_DIRS[$i]:-}   # run_dir: optional payu control directory (status page only)
-    extra=${EXTRA_NOTEBOOKS[$i]:-}                        # optional notebooks for this experiment only
-    key="$commit ${NOTEBOOKS[*]} $extra"
+    nbs=${EXP_NOTEBOOKS[$i]:-${NOTEBOOKS[*]}}             # this experiment's own list, else the standard one
+    key="$commit $nbs"
     e=$(basename "$path")   # ENAME = name of the archive folder
     if [ "$e" = archive ]; then echo "$path: give the folder that 'archive' links to, not the link" >&2; continue; fi
     out=$(readlink -f "$path") || true
-    if [ ! -d "$out" ]; then echo "no output directory found at $path" >&2; continue; fi
+    if [ ! -d "$out" ]; then
+        note "$e" "no output directory found at $path"
+        printf '{"decision": "no output folder found at %s"}\n' "$path" > "$WORK/status/$e.job.json"
+        continue
+    fi
     add_storage "$out"
     python3 "$WORK/gadi/run_status.py" "$out" "$WORK/status/$e.json" ${run_dir:+"$run_dir"} || echo "could not read run status for $e" >&2
     # One-off move: results used to be read straight from the paper checkout's mkfigs_output folders.
@@ -48,30 +59,38 @@ for i in "${!EXPERIMENTS[@]}"; do
     if [ ! -d "$WORK/results/$e" ] && [ -d "$old" ]; then cp -r "$old" "$WORK/results/$e"; fi
 
     # This experiment's last job: still going, or ended without finishing (walltime, memory, qdel)?
-    job=$(cat "$STATE/$e.jobid" 2>/dev/null || true)
+    job=$(cat "$STATE/$e.jobid" 2>/dev/null || true) state="" last="{}"
     if running "$job"; then
-        printf '{"running": "%s"}\n' "$job" > "$WORK/status/$e.job.json"
-        continue   # leave it be; its results are published once it finishes
-    elif [ -e "$STATE/$e.pending" ] && [ -n "$job" ]; then
-        printf '{"unfinished": "%s"}\n' "$job" > "$WORK/status/$e.job.json"
+        state="\"running\": \"$job\", " decision="its job $job is still running"
+    else
+        [ -z "$job" ] || last=$(jobinfo "$job")
+        if [ -e "$STATE/$e.pending" ] && [ -n "$job" ]; then state="\"unfinished\": \"$job\", "; fi
+        stamp="$STATE/$e.stamp" reason=""
+        if [ "$MODE" = collect ]; then reason=""
+        elif [ "$FORCE" = true ]; then reason="forced"
+        elif [ ! -e "$stamp" ]; then reason="first run"
+        elif [ "$(cat "$stamp")" != "$key" ]; then reason="notebooks or paper commit changed"
+        elif [ -n "$(find "$out" -name '*.nc' -newer "$stamp" -print -quit)" ]; then reason="new output"
+        fi
+        if [ -n "$reason" ]; then
+            echo "$e=$out=$nbs" > "$WORK/run_lists/$e"
+            echo "$key" > "$STATE/$e.pending"   # becomes $e.stamp when its job finishes
+            job=$(qsub -P "$PROJECT" -l storage="$STORAGE" -o "$WORK/logs" -e "$WORK/logs" \
+                       -v "WORK=$WORK,RUN_LIST=$WORK/run_lists/$e" "$WORK/gadi/mkfigs_live.sh")   # a failed qsub stops the run
+            echo "$job" > "$STATE/$e.jobid"
+            state="\"running\": \"$job\", " decision="submitted job $job ($reason; storage $STORAGE)"
+            jobids+=("$job")
+        elif [ "$MODE" = collect ]; then decision=$(cat "$STATE/$e.decision" 2>/dev/null || echo "status refreshed")
+        else decision="skipped: no new output"
+        fi
     fi
-
-    stamp="$STATE/$e.stamp"
-    if [ "$MODE" != collect ] && { [ "$FORCE" = true ] || [ ! -e "$stamp" ] || [ "$(cat "$stamp")" != "$key" ] \
-       || [ -n "$(find "$out" -name '*.nc' -newer "$stamp" -print -quit)" ]; }; then
-        echo "$e=$out=$extra" > "$WORK/run_lists/$e"
-        echo "$key" > "$STATE/$e.pending"   # becomes $e.stamp when its job finishes
-        echo "qsub $e: -P $PROJECT -l storage=$STORAGE" >&2
-        job=$(qsub -P "$PROJECT" -l storage="$STORAGE" -o "$WORK/logs" -e "$WORK/logs" \
-                   -v "WORK=$WORK,RUN_LIST=$WORK/run_lists/$e" "$WORK/gadi/mkfigs_live.sh")   # a failed qsub stops the run
-        echo "$job" > "$STATE/$e.jobid"
-        printf '{"running": "%s"}\n' "$job" > "$WORK/status/$e.job.json"
-        jobids+=("$job")
-    fi
+    [ "$MODE" = collect ] || echo "$decision" > "$STATE/$e.decision"   # kept for the refresh after the jobs
+    note "$e" "$decision"
+    printf '{%s"decision": "%s", "last": %s}\n' "$state" "$decision" "$last" > "$WORK/status/$e.job.json"
 done
 
 # Rebuild the site if the experiment list, any run's status or job, any finished job's results,
-# or the Evaluation Summary changed. Jobs submitted now are published by a later run.
+# or the Evaluation Summary changed.
 echo "$SUMMARY_SHA ${EXPERIMENTS[*]} $(cat "$WORK"/status/*.json 2>/dev/null | md5sum)" \
      "$(ls -l --time-style=+%s "$STATE"/*.stamp 2>/dev/null | md5sum)" > "$STATE/published.pending"
 echo "jobids=${jobids[*]}"
