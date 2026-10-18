@@ -327,6 +327,17 @@ def friends(run_dir, name):
     return found
 
 
+def payu_status(run_dir):
+    """Output of `payu status` in the run's control directory, or None if payu isn't available or it fails
+    (for instance for a run owned by another account: payu looks for the archive under this account's /scratch)."""
+    try:
+        p = subprocess.run(["payu", "status"], cwd=run_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           universal_newlines=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return p.stdout.strip() if p.returncode == 0 and "Run:" in p.stdout else None
+
+
 def datastore_summary(path):
     """For an experiment given as an intake-esm datastore (.json), e.g. ACCESS-CM3: its catalogue's file count and years."""
     out = {"files": 0, "years": None, "mtime": os.path.getmtime(path) if readable(path) else None}
@@ -336,11 +347,14 @@ def datastore_summary(path):
         catalog = catalog[len("file://"):] if catalog.startswith("file://") else catalog
         csv_path = os.path.join(os.path.dirname(path), catalog)
         with (gzip.open if csv_path.endswith(".gz") else open)(csv_path, "rt") as f:
-            years = []
+            years = set()
             for row in csv.DictReader(f):
                 out["files"] += 1
-                years += [v[:4] for v in (row.get("start_date"), row.get("end_date")) if v and v[:4].isdigit()]
+                start = row.get("start_date") or ""
+                if row.get("frequency") != "fx" and start[:4].isdigit():  # fixed files carry placeholder dates
+                    years.add(start[:4])
         out["years"] = [min(years), max(years)] if years else None
+        out["n_years"] = len(years)
     except (OSError, ValueError, csv.Error):
         pass
     return out
@@ -387,6 +401,7 @@ def main(archive, dest, run_dir=None):
                    "run_dir": run_dir,
                    "settings": settings_history(run_dir) if run_dir else None,
                    "friends": friends(run_dir, os.path.basename(dest)[:-5]) if run_dir else None,
+                   "payu_status": payu_status(run_dir) if run_dir else None,
                    "work_truncations": truncations([os.path.join(run_dir, "work")]) if run_dir else None, "run_logs": run_dir_logs(run_dir) if run_dir else {},
                    "configs": {p: {"text": tail(p, lines=100000, nbytes=500000), "mtime": os.path.getmtime(p)}
                                for p in configs if readable(p)}}, f, indent=1)

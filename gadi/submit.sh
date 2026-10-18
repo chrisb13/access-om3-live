@@ -47,6 +47,9 @@ if [ "$MODE" != collect ]; then
         || echo "could not update access-om3-configs" >&2
 fi
 
+# payu, for each run directory's `payu status` (run_status.py); skipped if it isn't available
+command -v payu >/dev/null || { module use /g/data/vk83/modules && module load payu; } >/dev/null 2>&1 || true
+
 rm -rf "$WORK/status" && mkdir -p "$WORK/status"   # one run_status.py snapshot per experiment
 jobids=()
 for i in "${!EXPERIMENTS[@]}"; do

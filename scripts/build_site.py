@@ -932,7 +932,7 @@ def friends_section(st: dict) -> list:
 def datastore_page(e: str, st: dict, nb_links: str) -> str:
     """Status page for an experiment given as a datastore (.json, e.g. ACCESS-CM3): what the catalogue says, and its notebooks."""
     d = st.get("datastore") or {}
-    years = f"{d['years'][0]}–{d['years'][1]}" if d.get("years") else "unknown"
+    years = f"{d.get('n_years') or '?'} ({d['years'][0]}–{d['years'][1]})" if d.get("years") else "unknown"
     return "\n".join([f"# {e}\n"] + ([f"{st['description']}\n"] if st.get("description") else [])
                      + ([f"**GitHub issue:** {_issue_link(st['issue'])}\n"] if st.get("issue") else []) + [
         f"**Notebooks:** {nb_links or 'none yet'}\n", "## Datastore\n",
@@ -955,13 +955,17 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     runs, archive, run_dir = st.get("runs", []), st.get("archive", "?"), st.get("run_dir")
     done = [r for r in runs if r.get("model_finish")]
     emoji, sentence = health(st)
+    years, _ = _progress(runs)
+    reached = (f" **Model date reached:** {_date(done[-1]['model_finish'])}"
+               + (f" ({years:.1f} model years complete)." if years else ".")) if done else ""
     md = [f"# {e}\n"] + ([f"{st['description']}\n"] if st.get("description") else []) + [
-          f"{emoji} **Latest submission:** {sentence}\n",
+          f"{emoji} **Latest submission:** {sentence}{reached}\n",
           f"**Notebooks:** {nb_links or 'none yet'}\n"]
     if st.get("issue"):
         md.append(f"**GitHub issue:** {_issue_link(st['issue'])}\n")
-    md += _block("📋 Summary for the GitHub issue (Markdown, ready to paste)", issue_summary(e, st), kind="abstract",
-                 lang="markdown", fence="````")
+    if st.get("payu_status"):
+        md += _block("payu status (run in the control directory)", st["payu_status"], kind="info")
+    md += _block("📋 Summary for the GitHub issue", issue_summary(e, st), kind="abstract", lang="markdown", fence="````")
     if run_dir:
         md += ["## Run directory: current or crashed run\n", f"Read from the payu control directory `{run_dir}`.\n"]
         med = next((v["text"] for k, v in st["run_logs"].items() if k.endswith("work/log/med.log")), "")
@@ -1082,12 +1086,15 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
         f", avg {avg:.1f} SYPD" if years and avg else "") + (")" if years else "")
     ds = st.get("datastore") or {}
     reached = ("⚠️ no status snapshot" if st.get("no_snapshot") else
-               "– (datastore given directly" + (f"; years {ds['years'][0]}–{ds['years'][1]}" if ds.get("years") else "") + ")"
+               "– (datastore given directly" + (f"; {ds.get('n_years') or '?'} model years, {ds['years'][0]}–{ds['years'][1]}"
+                                                 if ds.get("years") else "") + f")<br>{_when(latest)}"
                if st.get("datastore_only") else
                f"{health(st)[0]} {_date(done[-1]['model_finish']) if done else ''}{progress}<br>{_when(latest)}"
                if st.get("runs") else "–")
+    issue = f"[GitHub issue]({st['issue']})" if st.get("issue") else ""
+    described = " – ".join(x for x in (st["description"], issue) if x) or "–"
     return ({e: [f"live/{e}/index.md", *pages]},
-            f"| [{e}]({e}/index.md) | {st['description'] or '–'} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |",
+            f"| [{e}]({e}/index.md) | {described} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |",
             latest)
 
 
@@ -1201,14 +1208,17 @@ def main(summary_md: str) -> None:
     (docs / "live" / "index.md").write_text(
         # Hide the empty "On this page" column so the table gets the room (as the Experiments page does).
         "<style>.md-sidebar--secondary:not([hidden]) { display: none }</style>\n\n"
-        "# OM3 Monitor\n\nNotebooks re-run nightly on Gadi for runs in progress; an experiment is only re-run "
+        "# OM3 Monitor\n\nFollows ACCESS-OM3 runs while they are running: each night it re-runs a few evaluation notebooks "
+        "on each run's latest output and builds a status page from its payu records and logs. Pages are replaced "
+        "nightly; nothing is kept.\n\n"
+        "Experiments are listed by their latest activity with newest first. An experiment's notebooks are only re-run "
         "when it has new output. Click an experiment for its run status. Times are Canberra time.\n\n"
         "!!! warning \"Written with Claude: please check\"\n"
-        "    These pages, and the code that builds them, were written by Claude. "
-        "They are generated automatically from each run's files; "
-        "each status page has copyable checks for this. "
+        "    OM3 Monitor pages and the code that builds them were written mostly by Claude with feedback from "
+        "[@chrisb13](https://github.com/chrisb13/). Each status page has copyable checks that one can run on Gadi. "
         "Please report anything wrong or unclear: see [Contributing and feedback](../contributing.md).\n\n"
-        "| Experiment | Description | Latest submission, model date reached | Notebooks last run | Notebooks shown "
+        "| Experiment | Description | Latest submission (model date reached)<br>last payu record ▾ | Notebooks last run "
+        "| Notebooks shown "
         "| Failed |\n|---|---|---|---|---|---|\n"
         + "\n".join(rows) + "\n" + plot + "\n" + help_text)
 
