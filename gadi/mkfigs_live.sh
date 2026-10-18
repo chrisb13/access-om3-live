@@ -36,6 +36,11 @@ while IFS='=' read -r ENAME OUTDIR NBS; do
     # files in this archive; otherwise build our own (minutes, sometimes much longer).
     CAT="$PBS_JOBFS/$ENAME" newest=$(ls -d "$OUTDIR"/output[0-9]* 2>/dev/null | tail -1) how=built
     mkdir -p "$CAT"
+    if [ -f "$OUTDIR" ]; then   # a datastore (.json) given in experiments.yml, e.g. ACCESS-CM3: use it as it is
+        ln -sf "$OUTDIR" "$CAT/datastore.json"
+        for f in "${OUTDIR%.json}".*; do [ "$f" = "$OUTDIR" ] || ln -sf "$f" "$CAT/"; done   # its catalogue (.csv)
+        how="given in experiments.yml"
+    fi
     for ds in "$OUTDIR/experiment_datastore.json" "$OUTDIR/datastore.json"; do
         base=${ds%.json}
         csv=$(ls "$base".csv* 2>/dev/null | head -1)
@@ -47,7 +52,7 @@ while IFS='=' read -r ENAME OUTDIR NBS; do
             break
         fi
     done
-    if [ "$how" = built ]; then
+    if [ "$how" = built ] && [ -d "$OUTDIR" ]; then
         build-esm-datastore --builder AccessOm3Builder --expt-dir "$OUTDIR" --cat-dir "$CAT" --datastore-name datastore
     fi
     echo "datastore $((SECONDS - t0)) $how" >> "$OUT/timings.txt"
@@ -55,7 +60,7 @@ while IFS='=' read -r ENAME OUTDIR NBS; do
     # Model throughput of the completed submissions (access-om3-paper-1's plot_sypd.py, PR #145):
     # first, and straight to the results, so it is updated even if a notebook later fails.
     t0=$SECONDS
-    if [ -f "$PAPER/notebooks/plot_sypd.py" ]; then
+    if [ -f "$PAPER/notebooks/plot_sypd.py" ] && [ -d "$OUTDIR" ]; then
         python3 "$PAPER/notebooks/plot_sypd.py" "$OUTDIR" --title "$ENAME" -o "$OUT/sypd.png" \
             && cp "$OUT/sypd.png" "$RESULTS/"
     fi

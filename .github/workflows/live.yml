@@ -74,10 +74,12 @@ jobs:
           FORCE: ${{ inputs.force || false }}
         run: |
           set -euo pipefail
-          python3 -c 'import shlex, yaml
+          python3 -c 'import shlex, sys, yaml
           c = yaml.safe_load(open("experiments.yml"))
           ex = [x if isinstance(x, dict) else {"archive": x} for x in c.pop("experiments")]
           c["experiments"], c["run_dirs"] = [x["archive"] for x in ex], [x.get("run_dir", "") for x in ex]
+          sys.path.insert(0, "scripts"); from build_site import ename
+          c["names"] = [ename(p) for p in c["experiments"]]  # experiment names, as the site uses them
           c["exp_notebooks"] = [" ".join(x.get("notebooks", [])) for x in ex]  # replaces `notebooks` when set
           for k, v in c.items():
               print(f"{k.upper()}=" + ("(" + " ".join(map(shlex.quote, v)) + ")" if isinstance(v, list) else shlex.quote(str(v))))' > config.sh
@@ -116,8 +118,7 @@ jobs:
           source config.sh
           mkdir -p content
           echo "::group::Copy results and run status from Gadi"
-          for e in "${EXPERIMENTS[@]}"; do
-            e=$(basename "$e")   # ENAME = name of the archive folder
+          for e in "${NAMES[@]}"; do
             rsync -a --include='mkmd/***' --include='*_rendered.ipynb' --include='sypd.png' --include='timings.txt' --exclude='*' \
               "$GADI:$WORK/results/$e/" "content/$e/" \
               || echo "::warning::no outputs yet for $e"

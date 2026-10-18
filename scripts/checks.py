@@ -226,3 +226,30 @@ def settings_changes(run_dir: str) -> str:
            f"git -C \"$R\" log -p --first-parent --reverse --format='=== %h %cI %s' \"$FIRST\"..HEAD -- {files}",
            "",
            "# If git says 'dubious ownership', the folder belongs to someone else: add  -c safe.directory=\"$R\"  after the word git."])
+
+
+def friends(run_dir: str, sha: str = None) -> str:
+    """The closest commit (and tag) the control directory shares with access-om3-configs."""
+    return "\n".join(
+        _note("WHAT THIS DOES: checks the 'Where are my friends?' section. It makes a temporary copy of "
+              "access-om3-configs (the repository of released configurations), adds this run's history to it, and asks "
+              "git which commits the two share. The newest shared commit is the run's closest 'friend'; git describe then "
+              "names the nearest tag before it.")
+        + _vars(run_dir=run_dir)
+        + ["", "# Step 1: a temporary copy of access-om3-configs (about 30 MB; deleted at the end)",
+           "T=$(mktemp -d)",
+           "git clone -q --bare https://github.com/ACCESS-NRI/access-om3-configs.git \"$T/configs.git\"",
+           "",
+           "# Step 2: add this run's history to the copy (nothing is changed in the run's own folder)",
+           "git -c safe.directory='*' --git-dir=\"$T/configs.git\" fetch -q \"$R\" +HEAD:refs/runs/this",
+           "",
+           "# Step 3: the commits this run shares with any branch or tag (the lines starting with '-'), newest first",
+           "git --git-dir=\"$T/configs.git\" rev-list --boundary refs/runs/this --not --branches --tags | grep '^-' \\",
+           "  | cut -c2- | xargs -r git --git-dir=\"$T/configs.git\" log --no-walk --format='%h %cI %s'",
+           "",
+           "# Step 4: which branches contain the newest shared commit, and the nearest tag before it",
+           f"S={shlex.quote(sha or '<the first commit printed in step 3>')}",
+           "git --git-dir=\"$T/configs.git\" branch --contains \"$S\"",
+           "git --git-dir=\"$T/configs.git\" describe --tags --abbrev=0 \"$S\"",
+           "",
+           "rm -rf \"$T\"   # remove the temporary copy"])

@@ -3,7 +3,9 @@
 Usage: run_status.py ARCHIVE_DIR OUT.json [RUN_DIR]
 RUN_DIR is the payu control directory: it holds the current (or crashed) run's PBS and model logs.
 """
+import csv
 import glob
+import gzip
 import json
 import math
 import os
@@ -268,8 +270,89 @@ def settings_history(run_dir):
     return {"runs": runs, "changes": changes, "build": build}
 
 
+# "Where are my friends?": the closest history this run's control directory shares with access-om3-configs,
+# from a bare clone kept next to this script's folder (submit.sh keeps it up to date).
+CONFIGS_CLONE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "access-om3-configs.git")
+DIFF_LINES = 3000  # longest diff kept in the snapshot
+
+
+def cgit(*args):
+    """Output of a git command in the access-om3-configs clone, or None if it fails."""
+    try:  # safe.directory=*: fetching from run directories that belong to other accounts
+        p = subprocess.run(("git", "-c", "safe.directory=*", "--git-dir=" + CONFIGS_CLONE) + args, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, universal_newlines=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return p.stdout if p.returncode == 0 else None
+
+
+def _diff(old, new):
+    """{'stat', 'text'} for the configuration difference between two commits (manifests left out)."""
+    spec = ("--", ".", ":(exclude)manifests")
+    text = cgit("diff", old, new, *spec) or ""
+    lines = text.splitlines()
+    if len(lines) > DIFF_LINES:
+        text = "\n".join(lines[:DIFF_LINES]) + "\n... (%d more lines)" % (len(lines) - DIFF_LINES)
+    return {"stat": (cgit("diff", "--shortstat", old, new, *spec) or "").strip(), "text": text}
+
+
+def friends(run_dir, name):
+    """Closest commit (and tag) this run's control directory shares with access-om3-configs, with diffs to both.
+    None if there is no clone or no git history to compare; {"found": False} if nothing is shared."""
+    head = (git(run_dir, "rev-parse", "HEAD") or "").strip()
+    if not head or not os.path.isdir(CONFIGS_CLONE):
+        return None
+    ref = "refs/runs/" + re.sub(r"[^A-Za-z0-9._-]", "_", name)
+    if cgit("fetch", "-q", "--no-tags", run_dir, "+HEAD:" + ref) is None:
+        return None
+    # Commits shared with any branch or tag: rev-list's boundary ("-") lines, or the run's own HEAD if nothing is new
+    out = cgit("rev-list", "--boundary", ref, "--not", "--branches", "--tags")
+    if out is None:
+        return None
+    shared = [line[1:] for line in out.splitlines() if line.startswith("-")] or ([] if out.strip() else [head])
+    if not shared:
+        return {"found": False}
+    dated = sorted((cgit("log", "-1", "--format=%ct", c) or "0").strip() + " " + c for c in shared)
+    sha = dated[-1].split()[1]  # the most recent shared commit
+    sha_short, when, subject = (cgit("log", "-1", "--format=%h%x1f%cI%x1f%s", sha) or "\x1f\x1f").strip().split("\x1f")
+    branches = (cgit("branch", "--contains", sha, "--format=%(refname:short)") or "").split()
+    ahead = lambda b: int((cgit("rev-list", "--count", sha + ".." + b) or "0").strip() or 0)
+    branch = min(branches[:60], key=lambda b: (b.startswith("auto/"), ahead(b)), default=None)
+    found = {"found": True, "sha": sha, "short": sha_short, "when": when, "subject": subject, "branch": branch,
+             "run_head": head[:8], "diff": _diff(sha, ref)}
+    tag = (cgit("describe", "--tags", "--abbrev=0", sha) or "").strip()
+    if tag:
+        found["tag"] = {"name": tag, "behind": int((cgit("rev-list", "--count", tag + ".." + sha) or "0").strip() or 0),
+                        "diff": _diff(tag, ref)}
+    return found
+
+
+def datastore_summary(path):
+    """For an experiment given as an intake-esm datastore (.json), e.g. ACCESS-CM3: its catalogue's file count and years."""
+    out = {"files": 0, "years": None, "mtime": os.path.getmtime(path) if readable(path) else None}
+    try:
+        with open(path) as f:
+            catalog = json.load(f).get("catalog_file") or ""
+        catalog = catalog[len("file://"):] if catalog.startswith("file://") else catalog
+        csv_path = os.path.join(os.path.dirname(path), catalog)
+        with (gzip.open if csv_path.endswith(".gz") else open)(csv_path, "rt") as f:
+            years = []
+            for row in csv.DictReader(f):
+                out["files"] += 1
+                years += [v[:4] for v in (row.get("start_date"), row.get("end_date")) if v and v[:4].isdigit()]
+        out["years"] = [min(years), max(years)] if years else None
+    except (OSError, ValueError, csv.Error):
+        pass
+    return out
+
+
 def main(archive, dest, run_dir=None):
     """Collect payu run records (payu_jobs/*/run/*.json), output count and recent log tails."""
+    if archive.endswith(".json"):  # an experiment given as its datastore (e.g. ACCESS-CM3): no payu records to read
+        with open(dest + ".tmp", "w") as f:
+            json.dump({"archive": archive, "datastore_only": True, "datastore": datastore_summary(archive)}, f, indent=1)
+        os.replace(dest + ".tmp", dest)
+        return
     runs = []
     for jf in glob.glob(os.path.join(archive, "payu_jobs", "*", "run", "*.json")):
         if not readable(jf):
@@ -303,6 +386,7 @@ def main(archive, dest, run_dir=None):
                    "truncations": truncations(outputs),
                    "run_dir": run_dir,
                    "settings": settings_history(run_dir) if run_dir else None,
+                   "friends": friends(run_dir, os.path.basename(dest)[:-5]) if run_dir else None,
                    "work_truncations": truncations([os.path.join(run_dir, "work")]) if run_dir else None, "run_logs": run_dir_logs(run_dir) if run_dir else {},
                    "configs": {p: {"text": tail(p, lines=100000, nbytes=500000), "mtime": os.path.getmtime(p)}
                                for p in configs if readable(p)}}, f, indent=1)

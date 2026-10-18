@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import json
 
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import yaml
 
@@ -30,6 +30,15 @@ ISSUE_URL = f"https://github.com/{REPO}/issues/new?" + urlencode({
     "title": "Feedback: ",
     "body": "**Page** (paste its link):\n\n**Experiment** (if it's about a run):\n\n"
             "**What's wrong, or what would help?**\n\n"})
+
+
+def ename(path: str) -> str:
+    """An experiment's name: its archive folder's name; for a datastore given directly (.json, e.g. ACCESS-CM3), the
+    nearest folder above it named differently from the file (.../cm3-run-X/cm3-datastore/cm3-datastore.json -> cm3-run-X)."""
+    p = Path(path)
+    if p.suffix != ".json":
+        return p.name
+    return next((parent.name for parent in p.parents if parent.name and parent.name != p.stem), p.stem)
 
 
 def _sypd(run: dict) -> str:
@@ -147,10 +156,11 @@ def _log_order(item) -> tuple:
     return rank, -item[1]["mtime"]
 
 
-def _block(title: str, text: str, kind: str = "note", lang: str = "text", opts: str = "") -> list:
-    """A collapsible block holding text, highlighted as lang (opts: extra code-fence options)."""
-    return [f'??? {kind} "{title}"', f"    ``` {lang} {opts}".rstrip(), "\n".join("    " + line for line in text.splitlines()),
-            "    ```", ""]
+def _block(title: str, text: str, kind: str = "note", lang: str = "text", opts: str = "", fence: str = "```") -> list:
+    """A collapsible block holding text, highlighted as lang (opts: extra code-fence options; a longer fence lets the
+    text contain ``` blocks of its own)."""
+    return [f'??? {kind} "{title}"', f"    {fence} {lang} {opts}".rstrip(), "\n".join("    " + line for line in text.splitlines()),
+            f"    {fence}", ""]
 
 
 def _check(title: str, code: str) -> list:
@@ -819,6 +829,120 @@ def settings_section(st: dict, e: str = "") -> list:
     return md + _check("the build and every edit listed here", checks.settings_changes(st["run_dir"]))
 
 
+CONFIGS_URL = "https://github.com/ACCESS-NRI/access-om3-configs"
+# The site's address, for links in text copied elsewhere: SITE_URL if set, else the repository's GitHub Pages address
+SITE = os.environ.get("SITE_URL") or "https://{}.github.io/{}/".format(*REPO.lower().split("/"))
+
+
+def _issue_link(url: str) -> str:
+    """'[owner/repo#123](url)' for a GitHub issue or pull request, else the link itself."""
+    m = re.match(r"https://github\.com/([^/]+/[^/]+)/(?:issues|pull)/(\d+)", url or "")
+    return f"[{m[1]}#{m[2]}]({url})" if m else f"<{url}>"
+
+
+def _tail(text: str, n: int = 8) -> str:
+    """The last n non-empty lines of a log tail."""
+    return "\n".join([line for line in text.splitlines() if line.strip()][-n:])
+
+
+def issue_summary(e: str, st: dict) -> str:
+    """Markdown to paste into the run's GitHub issue: state, throughput, any crash with its log tails, the busiest
+    truncation locations, and references to the files used."""
+    runs, refs = st.get("runs", []), []
+    ref = lambda path: refs.append(path) or len(refs)  # number a reference, for the list at the end
+    emoji, sentence = health(st)
+    done = [r for r in runs if r.get("model_finish")]
+    years, sypd = _progress(runs)
+    md = [f"### OM3 Monitor summary: `{e}`", f"*{st['description']}*" if st.get("description") else "", "",
+          f"- **Latest submission:** {emoji} {sentence.replace(' See the logs below.', '')}",
+          f"- **Model date reached:** {_date(done[-1]['model_finish']) if done else 'unknown'}"
+          + (f" ({years:.1f} model years complete)" if years else ""),
+          f"- **Average throughput:** {sypd:.2f} SYPD" if sypd else "- **Average throughput:** not known"]
+    segs = [s for s in (st.get("truncations") or {}).get("segments", []) if s["truncs"] is not None]
+    total = sum(s["truncs"] for s in segs)
+    md.append(f"- **Truncations:** {total:,} in {sum(1 for s in segs if s['truncs'])} of {len(segs)} output folders"
+              if total else "- **Truncations:** none recorded in `ocean.stats`" if segs else "- **Truncations:** no `ocean.stats` files found")
+    if emoji == "❌" and runs:
+        last = runs[-1]
+        md[3] += (f" (run {last.get('run')}, PBS job {last.get('job_id') or '?'}, last recorded {_when(last.get('mtime'))}"
+                  f", model date {_date(_start(last, runs))})")
+        logs = {**st.get("logs", {}), **st.get("run_logs", {})}  # the run directory's own logs win: the crashed run
+        # access-om3.err/.out, or payu's copies of a failed run's (error_logs/access-om3.<job>.err/.out); newest first
+        picked = [p for p in sorted(logs, key=lambda p: -logs[p]["mtime"])
+                  if os.path.basename(p).startswith("access-om3.") and p.endswith((".err", ".out"))]
+        err = next((p for p in picked if p.endswith(".err")), None)
+        out = next((p for p in picked if p.endswith(".out")), None)
+        if err or out:
+            md += ["", "<details><summary>Last lines of the model logs</summary>", ""]
+            for p in (err, out):
+                if p:
+                    md += [f"`{os.path.basename(p)}` [{ref(p)}]", "```", _tail(logs[p]["text"]), "```"]
+            md += ["</details>"]
+    boxes = (st.get("truncations") or {}).get("boxes", [])[:5]
+    if boxes:
+        md += ["", "| Where | Records | Output folders | Max speed (m/s) | Max CFL |", "|---|---:|---|---:|---:|"]
+        md += [f"| {_place(b['lon'], b['lat'])} | {b['records']}{'*' if b['capped'] else ''} | {_spans(b['outputs'])} | "
+               f"{b['max_vel']:.1f} | {b['max_cfl']:.2f} |" for b in boxes]
+        if any(b["capped"] for b in boxes):
+            md.append("\n\\* a PE at MOM6's 50-records-per-run cap, so the true count is higher.")
+    ref(f"Archive folder: `{st.get('archive')}`")
+    if st.get("run_dir"):
+        ref(f"Run directory: `{st['run_dir']}` (current or crashed run in `work/`)")
+    ref(f"Status page: {SITE}live/{quote(e)}/")
+    md += ["", "**References**"] + [f"{i}. " + (r if r.startswith(("Archive", "Run directory", "Status")) else f"`{r}`")
+                                    for i, r in enumerate(refs, 1)]
+    md += ["", f"*Generated automatically by the [OM3 Monitor]({SITE}live/) on {_when(datetime.now(timezone.utc).timestamp())}; "
+               "it may contain errors, so check against the files above.*"]
+    return "\n".join(md)
+
+
+def _ref_link(kind: str, name: str) -> str:
+    """A link to a branch, tag or commit of access-om3-configs, by its readable name."""
+    return f"[{name}]({CONFIGS_URL}/{'commit' if kind == 'commit' else 'tree'}/{name})"
+
+
+def friends_section(st: dict) -> list:
+    """'Where are my friends?': the closest history the control directory shares with access-om3-configs."""
+    f, run_dir = st.get("friends"), st.get("run_dir")
+    if f is None or not run_dir:  # no run directory, no git history there, or no clone to compare with
+        return []
+    md = ["## Where are my friends?\n"]
+    if not f.get("found"):
+        return md + ["😢 **Couldn't find any of its friends!** This run's control directory shares no history with "
+                     f"[access-om3-configs]({CONFIGS_URL}).\n"] + _check("that nothing is shared", checks.friends(run_dir))
+    commit = (_ref_link("tree", f["tag"]["name"]) if f.get("tag") and f["tag"]["behind"] == 0 else _ref_link("commit", f["short"]))
+    md += [f"How this run's configuration relates to [access-om3-configs]({CONFIGS_URL}): the newest commit that the control "
+           f"directory's history (latest commit `{f['run_head']}`) shares with the configurations repository.\n",
+           f"- **Closest shared commit:** {commit}" + (f" on branch {_ref_link('tree', f['branch'])}" if f.get("branch") else "")
+           + f" · {_date(f['when'])} · “{f['subject']}”",
+           f"- **Changes in this run since then:** {f['diff']['stat'] or 'none'}"]
+    if f.get("tag"):
+        md += [f"- **Closest tag:** {_ref_link('tree', f['tag']['name'])}"
+               + (f", {f['tag']['behind']} commits before the shared commit" if f["tag"]["behind"] else " (the shared commit itself)"),
+               f"- **Changes in this run since that tag:** {f['tag']['diff']['stat'] or 'none'}"]
+    md.append("")
+    label = f["branch"] or f["short"]
+    if f["diff"]["text"]:
+        md += _block(f"Diff: this run vs {label} @ {f['short']}", f["diff"]["text"], kind="example", lang="diff")
+    if f.get("tag") and f["tag"]["diff"]["text"] and f["tag"]["behind"]:
+        md += _block(f"Diff: this run vs tag {f['tag']['name']}", f["tag"]["diff"]["text"], kind="example", lang="diff")
+    return md + _check("the closest shared commit and tag", checks.friends(run_dir, f["short"]))
+
+
+def datastore_page(e: str, st: dict, nb_links: str) -> str:
+    """Status page for an experiment given as a datastore (.json, e.g. ACCESS-CM3): what the catalogue says, and its notebooks."""
+    d = st.get("datastore") or {}
+    years = f"{d['years'][0]}–{d['years'][1]}" if d.get("years") else "unknown"
+    return "\n".join([f"# {e}\n"] + ([f"{st['description']}\n"] if st.get("description") else [])
+                     + ([f"**GitHub issue:** {_issue_link(st['issue'])}\n"] if st.get("issue") else []) + [
+        f"**Notebooks:** {nb_links or 'none yet'}\n", "## Datastore\n",
+        f"Read from the datastore given in `experiments.yml`: `{st.get('archive')}`.\n",
+        f"- **Files catalogued:** {d.get('files', 0):,}", f"- **Model years in the catalogue:** {years}",
+        f"- **Datastore last modified:** {_when(d.get('mtime')) or 'unknown'}", "",
+        "This experiment isn't a payu run (ACCESS-CM3, for example, runs with Rose/Cylc), so the run-status sections "
+        "(recent runs, logs, truncations, settings) don't apply here; its notebooks are run on this datastore as it is.\n"])
+
+
 def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     """Markdown for an experiment's run-status page, from gadi/run_status.py's snapshot."""
     if st.get("no_snapshot"):  # nothing was read from Gadi: say so, rather than showing zeros
@@ -834,6 +958,10 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     md = [f"# {e}\n"] + ([f"{st['description']}\n"] if st.get("description") else []) + [
           f"{emoji} **Latest submission:** {sentence}\n",
           f"**Notebooks:** {nb_links or 'none yet'}\n"]
+    if st.get("issue"):
+        md.append(f"**GitHub issue:** {_issue_link(st['issue'])}\n")
+    md += _block("📋 Summary for the GitHub issue (Markdown, ready to paste)", issue_summary(e, st), kind="abstract",
+                 lang="markdown", fence="````")
     if run_dir:
         md += ["## Run directory: current or crashed run\n", f"Read from the payu control directory `{run_dir}`.\n"]
         med = next((v["text"] for k, v in st["run_logs"].items() if k.endswith("work/log/med.log")), "")
@@ -877,6 +1005,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
         md += _block(f"{archive}/metadata.yaml", st["metadata"], kind="info", lang="yaml")
     md += truncation_section(st)
     md += settings_section(st, e)
+    md += friends_section(st)
     return "\n".join(md)
 
 
@@ -935,19 +1064,26 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
     if not st:
         st["no_snapshot"] = entry["archive"] if isinstance(entry, dict) else entry  # as listed in experiments.yml
     st["description"], from_metadata = description(entry, st)
+    st["issue"] = entry.get("issue") if isinstance(entry, dict) else None  # where the run is discussed on GitHub
     if from_metadata:  # say so, so it isn't mistaken for a description written for this site
         st["description"] += " *(from the run's metadata.yaml)*"
     (docs / "live" / e).mkdir(parents=True, exist_ok=True)
     if (src / "sypd.png").exists():
         shutil.copy2(src / "sypd.png", docs / "live" / e)
-    (docs / "live" / e / "index.md").write_text(status_page(e, st, links + (f"\n\n{job_note}" if job_note else ""),
+    page = (lambda e, st, links, png: datastore_page(e, st, links)) if st.get("datastore_only") else status_page
+    (docs / "live" / e / "index.md").write_text(page(e, st, links + (f"\n\n{job_note}" if job_note else ""),
                                                             (src / "sypd.png").exists()))
     done = [r for r in st.get("runs", []) if r.get("model_finish")]
     latest = max((r.get("mtime") or 0 for r in st.get("runs", [])), default=0)  # when payu last recorded a run
+    if st.get("datastore_only"):  # e.g. ACCESS-CM3: sorted by when its datastore last changed
+        latest = (st.get("datastore") or {}).get("mtime") or 0
     years, avg = _progress(st.get("runs", []))
     progress = (f" ({years:.0f} years complete" if years and years >= 10 else f" ({years:.1f} years complete" if years else "") + (
         f", avg {avg:.1f} SYPD" if years and avg else "") + (")" if years else "")
+    ds = st.get("datastore") or {}
     reached = ("⚠️ no status snapshot" if st.get("no_snapshot") else
+               "– (datastore given directly" + (f"; years {ds['years'][0]}–{ds['years'][1]}" if ds.get("years") else "") + ")"
+               if st.get("datastore_only") else
                f"{health(st)[0]} {_date(done[-1]['model_finish']) if done else ''}{progress}<br>{_when(latest)}"
                if st.get("runs") else "–")
     return ({e: [f"live/{e}/index.md", *pages]},
@@ -1032,7 +1168,7 @@ def main(summary_md: str) -> None:
     for entry in cfg["experiments"]:
         path = entry["archive"] if isinstance(entry, dict) else entry
         notebooks = (entry.get("notebooks") if isinstance(entry, dict) else None) or cfg["notebooks"]  # own list replaces
-        e = Path(path).name  # ENAME = name of the archive folder
+        e = ename(path)
         if e == "archive":  # submit.sh skips these: the link's target folder must be listed instead
             listed.append((-1, None, f"| `{path}` | | ⚠️ not monitored: list the folder this `archive` link points to | | | |"))
             continue
@@ -1055,7 +1191,7 @@ def main(summary_md: str) -> None:
             live_nav.append(nav)
 
     (docs / "live").mkdir(exist_ok=True)
-    names = [Path(x["archive"] if isinstance(x, dict) else x).name for x in cfg["experiments"]]
+    names = [ename(x["archive"] if isinstance(x, dict) else x) for x in cfg["experiments"]]
     series = {n: _snapshot(STATUS / f"{n}.json").get("runs", []) for n in names if n != "archive"}
     plot = ("\n## Throughput of all runs\n\nSimulated years per day (SYPD) of every completed run, from payu's job records, "
             "against the model year it reached: one line per experiment in the table above.\n\n"

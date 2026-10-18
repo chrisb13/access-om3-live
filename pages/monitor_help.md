@@ -39,6 +39,10 @@ The terms match the sections of each experiment's status page:
 - **Description** (`description`, optional): one line shown in the OM3 Monitor table and at the top
   of the status page. Without it, the first line of the description in the run's `metadata.yaml` is
   used.
+- **GitHub issue** (`issue`, optional): where the run is discussed, linked at the top of its status page.
+
+A run that isn't a payu run, such as ACCESS-CM3, can be given as its intake-esm datastore (a `.json`
+path under `archive`). The datastore is used as it is, and only its notebooks are run.
 
 The folders must be readable by the Gadi account that runs the nightly job. To stop monitoring an
 experiment, remove its entry.

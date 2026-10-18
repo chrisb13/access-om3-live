@@ -38,16 +38,25 @@ add_storage "$(readlink -f "$WORK")"   # config.sh, the paper checkout and outpu
 
 # Re-run an experiment if it has new .nc output, or its notebooks (commit or list) changed.
 commit=$(git -C "$PAPER" rev-parse HEAD)
+# A bare clone of access-om3-configs, for each status page's "Where are my friends?" (run_status.py)
+CONFIGS="$WORK/access-om3-configs.git"
+if [ "$MODE" != collect ]; then
+    [ -d "$CONFIGS" ] || git clone -q --bare https://github.com/ACCESS-NRI/access-om3-configs.git "$CONFIGS" \
+        || echo "could not clone access-om3-configs" >&2
+    git --git-dir="$CONFIGS" fetch -q --prune --tags origin '+refs/heads/*:refs/heads/*' 2>/dev/null \
+        || echo "could not update access-om3-configs" >&2
+fi
+
 rm -rf "$WORK/status" && mkdir -p "$WORK/status"   # one run_status.py snapshot per experiment
 jobids=()
 for i in "${!EXPERIMENTS[@]}"; do
     path=${EXPERIMENTS[$i]} run_dir=${RUN_DIRS[$i]:-}   # run_dir: optional payu control directory (status page only)
     nbs=${EXP_NOTEBOOKS[$i]:-${NOTEBOOKS[*]}}             # this experiment's own list, else the standard one
     key="$commit $nbs"
-    e=$(basename "$path")   # ENAME = name of the archive folder
+    e=${NAMES[$i]}   # the experiment's name (see ename in scripts/build_site.py)
     if [ "$e" = archive ]; then echo "$path: give the folder that 'archive' links to, not the link" >&2; continue; fi
     out=$(readlink -f "$path") || true
-    if [ ! -d "$out" ]; then
+    if [ ! -d "$out" ] && [ ! -f "$out" ]; then   # a folder, or a datastore (.json) given directly
         note "$e" "no output directory found at $path"
         printf '{"decision": "no output folder found at %s"}\n' "$path" > "$WORK/status/$e.job.json"
         continue
@@ -70,7 +79,8 @@ for i in "${!EXPERIMENTS[@]}"; do
         elif [ "$FORCE" = true ]; then reason="forced"
         elif [ ! -e "$stamp" ]; then reason="first run"
         elif [ "$(cat "$stamp")" != "$key" ]; then reason="notebooks or paper commit changed"
-        elif [ -n "$(find "$out" -name '*.nc' -newer "$stamp" -print -quit)" ]; then reason="new output"
+        elif [ -d "$out" ] && [ -n "$(find "$out" -name '*.nc' -newer "$stamp" -print -quit)" ]; then reason="new output"
+        elif [ -f "$out" ] && [ "$out" -nt "$stamp" ]; then reason="datastore updated"
         fi
         if [ -n "$reason" ]; then
             echo "$e=$out=$nbs" > "$WORK/run_lists/$e"
