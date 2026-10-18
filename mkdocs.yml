@@ -25,8 +25,7 @@ theme:
       toggle:
         icon: material/theme-light-dark
         name: Switch to light mode
-  features:
-    - navigation.instant
+  features:   # no navigation.instant: it can't swap in pages whose SVG charts contain links
     - navigation.tracking
     - navigation.indexes
     - search.suggest
