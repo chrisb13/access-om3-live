@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import json
 
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import markdown
 import yaml
@@ -28,6 +28,11 @@ CONTENT, THEME, BUILD, STATUS = ROOT / "content", ROOT / "theme" / "documentatio
 CONFIGS_SITE = "https://access-om3-configs.access-hive.org.au/latest/"
 CANBERRA = ZoneInfo("Australia/Canberra")
 REPO = os.environ.get("GITHUB_REPOSITORY", "ACCESS-NRI/access-om3-live")  # set by GitHub Actions
+# A new GitHub issue with a short template filled in (pages/contributing.md links to it)
+ISSUE_URL = f"https://github.com/{REPO}/issues/new?" + urlencode({
+    "title": "Feedback: ",
+    "body": "**Page** (paste its link):\n\n**Experiment** (if it's about a run):\n\n"
+            "**What's wrong, or what would help?**\n\n"})
 
 
 def ename(path: str) -> str:
@@ -1306,8 +1311,18 @@ def main(summary_md: str) -> None:
     shutil.copy2(ROOT / "pages" / "config-diff.md", docs)
     write_config_diff_data(summary_md, docs / "assets" / "config_diff")
 
-    # Evaluation Summary: access-om3-configs' Experiments.md, with site-relative links sent back there.
-    (docs / "index.md").write_text(Path(summary_md).read_text().replace("](/", f"]({CONFIGS_SITE}"))
+    contributing = (ROOT / "pages" / "contributing.md").read_text()
+    (docs / "contributing.md").write_text(contributing.replace("{repo}", REPO).replace("{issue_url}", ISSUE_URL))
+    home = (ROOT / "pages" / "home.md").read_text()
+    (docs / "index.md").write_text(home.replace("{repo}", REPO).replace("{notebooks}", ", ".join(cfg["notebooks"])))
+    # Evaluation Summary: access-om3-configs' Experiments.md, with site-relative links sent back there,
+    # and a note under its heading on how to use it.
+    summary = Path(summary_md).read_text().replace("](/", f"]({CONFIGS_SITE}")
+    (docs / "evaluation-summary.md").write_text(summary.replace("\n# ACCESS-OM3 Experiments\n", (
+        "\n# ACCESS-OM3 Experiments\n\n!!! tip \"Finding an experiment's evaluation\"\n"
+        "    Each row is one experiment. Click **Evaluation** in its row to open the fixed, versioned "
+        "evaluation website for that run, with all its figures and notebooks. This table is copied from the "
+        f"[Experiments]({CONFIGS_SITE}Experiments/) page of the access-om3-configs documentation.\n"), 1))
 
     live_nav, rows = ["live/index.md"], []
     listed = []  # (latest payu record time, menu entry, table row) per experiment
@@ -1352,6 +1367,10 @@ def main(summary_md: str) -> None:
         "nightly; nothing is kept.\n\n"
         "Experiments are listed by their latest activity with newest first. An experiment's notebooks are only re-run "
         "when it has new output. Click an experiment for its run status. Times are Canberra time.\n\n"
+        "!!! warning \"Written with Claude: please check\"\n"
+        "    OM3 Monitor pages and the code that builds them were written mostly by Claude with feedback from "
+        "[@chrisb13](https://github.com/chrisb13/). Each status page has copyable checks that one can run on Gadi. "
+        "Please report anything wrong or unclear: see [Contributing and feedback](../contributing.md).\n\n"
         "| Experiment | Description | Latest submission (model date reached)<br>last payu record ▾ | Notebooks last run "
         "| Notebooks shown "
         "| Failed |\n|---|---|---|---|---|---|\n"
@@ -1360,8 +1379,9 @@ def main(summary_md: str) -> None:
     if os.environ.get("GITHUB_STEP_SUMMARY"):  # shown at the top of the workflow run's page
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write(run_summary([n for n in names if n != "archive"]))
-    nav = [{"Evaluation Summary": "index.md"}, {"OM3 Monitor": live_nav}, {"Config Diff": "config-diff.md"}]
-    (BUILD / "mkdocs.yml").write_text(yaml.safe_dump({"INHERIT": "../mkdocs.yml", "nav": nav}, sort_keys=False))
+    nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Config Diff": "config-diff.md"}, {"Evaluation Summary": "evaluation-summary.md"},
+           {"Contributing and feedback": "contributing.md"}]
+    (BUILD / "mkdocs.yml").write_text(yaml.safe_dump({"INHERIT": "../mkdocs.yml", "nav": nav, "hooks": ["../scripts/edit_links.py"]}, sort_keys=False))
 
 
 if __name__ == "__main__":
