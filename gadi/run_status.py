@@ -279,6 +279,63 @@ def settings_history(run_dir, ref="HEAD"):
             "completed": len(numbers) - len(superseded), "redone": sorted(n for i, n in numbers if i in superseded)}
 
 
+# "Where are my friends?": the closest history this run's control directory shares with access-om3-configs,
+# from a bare clone kept next to this script's folder (submit.sh keeps it up to date).
+CONFIGS_CLONE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "access-om3-configs.git")
+DIFF_LINES = 3000  # longest diff kept in the snapshot
+
+
+def cgit(*args):
+    """Output of a git command in the access-om3-configs clone, or None if it fails."""
+    try:  # safe.directory=*: fetching from run directories that belong to other accounts
+        p = subprocess.run(("git", "-c", "safe.directory=*", "--git-dir=" + CONFIGS_CLONE) + args, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, universal_newlines=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return p.stdout if p.returncode == 0 else None
+
+
+def _diff(old, new):
+    """{'stat', 'text'} for the configuration difference between two commits (manifests left out)."""
+    spec = ("--", ".", ":(exclude)manifests")
+    text = cgit("diff", old, new, *spec) or ""
+    lines = text.splitlines()
+    if len(lines) > DIFF_LINES:
+        text = "\n".join(lines[:DIFF_LINES]) + "\n... (%d more lines)" % (len(lines) - DIFF_LINES)
+    return {"stat": (cgit("diff", "--shortstat", old, new, *spec) or "").strip(), "text": text}
+
+
+def friends(run_dir, name):
+    """Closest commit (and tag) this run's control directory shares with access-om3-configs, with diffs to both.
+    None if there is no clone or no git history to compare; {"found": False} if nothing is shared."""
+    head = (git(run_dir, "rev-parse", "HEAD") or "").strip()
+    if not head or not os.path.isdir(CONFIGS_CLONE):
+        return None
+    ref = "refs/runs/" + re.sub(r"[^A-Za-z0-9._-]", "_", name)
+    if cgit("fetch", "-q", "--no-tags", run_dir, "+HEAD:" + ref) is None:
+        return None
+    # Commits shared with any branch or tag: rev-list's boundary ("-") lines, or the run's own HEAD if nothing is new
+    out = cgit("rev-list", "--boundary", ref, "--not", "--branches", "--tags")
+    if out is None:
+        return None
+    shared = [line[1:] for line in out.splitlines() if line.startswith("-")] or ([] if out.strip() else [head])
+    if not shared:
+        return {"found": False}
+    dated = sorted((cgit("log", "-1", "--format=%ct", c) or "0").strip() + " " + c for c in shared)
+    sha = dated[-1].split()[1]  # the most recent shared commit
+    sha_short, when, subject = (cgit("log", "-1", "--format=%h%x1f%cI%x1f%s", sha) or "\x1f\x1f").strip().split("\x1f")
+    branches = (cgit("branch", "--contains", sha, "--format=%(refname:short)") or "").split()
+    ahead = lambda b: int((cgit("rev-list", "--count", sha + ".." + b) or "0").strip() or 0)
+    branch = min(branches[:60], key=lambda b: (b.startswith("auto/"), ahead(b)), default=None)
+    found = {"found": True, "sha": sha, "short": sha_short, "when": when, "subject": subject, "branch": branch,
+             "run_head": head[:8], "diff": _diff(sha, ref)}
+    tag = (cgit("describe", "--tags", "--abbrev=0", sha) or "").strip()
+    if tag:
+        found["tag"] = {"name": tag, "behind": int((cgit("rev-list", "--count", tag + ".." + sha) or "0").strip() or 0),
+                        "diff": _diff(tag, ref)}
+    return found
+
+
 def payu_status(run_dir):
     """Output of `payu status` in the run's control directory, or None if payu isn't available or it fails
     (for instance for a run owned by another account: payu looks for the archive under this account's /scratch)."""
@@ -325,6 +382,7 @@ def main(archive, dest, run_dir=None):
                    "truncations": truncations(outputs),
                    "run_dir": run_dir,
                    "settings": settings_history(run_dir) if run_dir else None,
+                   "friends": friends(run_dir, os.path.basename(dest)[:-5]) if run_dir else None,
                    "payu_status": payu_status(run_dir) if run_dir else None,
                    "work_truncations": truncations([os.path.join(run_dir, "work")]) if run_dir else None, "run_logs": run_dir_logs(run_dir) if run_dir else {},
                    "configs": {p: {"text": tail(p, lines=100000, nbytes=500000), "mtime": os.path.getmtime(p)}

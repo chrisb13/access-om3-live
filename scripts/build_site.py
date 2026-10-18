@@ -873,10 +873,46 @@ def _timeline_narrow(shown: list, runs: list, restarts: list, t0: datetime, t1: 
     return _svg(W, ly + 62, parts, "Timeline of edits, one strip per setting", "narrow")
 
 
+CONFIGS_URL = "https://github.com/ACCESS-NRI/access-om3-configs"
+
+
 def _issue_link(url: str) -> str:
     """'[owner/repo#123](url)' for a GitHub issue or pull request, else the link itself."""
     m = re.match(r"https://github\.com/([^/]+/[^/]+)/(?:issues|pull)/(\d+)", url or "")
     return f"[{m[1]}#{m[2]}]({url})" if m else f"<{url}>"
+
+
+def _ref_link(kind: str, name: str) -> str:
+    """A link to a branch, tag or commit of access-om3-configs, by its readable name."""
+    return f"[{name}]({CONFIGS_URL}/{'commit' if kind == 'commit' else 'tree'}/{name})"
+
+
+def friends_section(st: dict) -> list:
+    """'Where are my friends?': the closest history the control directory shares with access-om3-configs."""
+    f, run_dir = st.get("friends"), st.get("run_dir")
+    if f is None or not run_dir:  # no run directory, no git history there, or no clone to compare with
+        return []
+    md = ["## Where are my friends?\n"]
+    if not f.get("found"):
+        return md + ["😢 **Couldn't find any of its friends!** This run's control directory shares no history with "
+                     f"[access-om3-configs]({CONFIGS_URL}).\n"]
+    commit = (_ref_link("tree", f["tag"]["name"]) if f.get("tag") and f["tag"]["behind"] == 0 else _ref_link("commit", f["short"]))
+    md += [f"How this run's configuration relates to [access-om3-configs]({CONFIGS_URL}): the newest commit that the control "
+           f"directory's history (latest commit `{f['run_head']}`) shares with the configurations repository.\n",
+           f"- **Closest shared commit:** {commit}" + (f" on branch {_ref_link('tree', f['branch'])}" if f.get("branch") else "")
+           + f" · {_date(f['when'])} · “{f['subject']}”",
+           f"- **Changes in this run since then:** {f['diff']['stat'] or 'none'}"]
+    if f.get("tag"):
+        md += [f"- **Closest tag:** {_ref_link('tree', f['tag']['name'])}"
+               + (f", {f['tag']['behind']} commits before the shared commit" if f["tag"]["behind"] else " (the shared commit itself)"),
+               f"- **Changes in this run since that tag:** {f['tag']['diff']['stat'] or 'none'}"]
+    md.append("")
+    label = f["branch"] or f["short"]
+    if f["diff"]["text"]:
+        md += _block(f"Diff: this run vs {label} @ {f['short']}", f["diff"]["text"], kind="example", lang="diff")
+    if f.get("tag") and f["tag"]["diff"]["text"] and f["tag"]["behind"]:
+        md += _block(f"Diff: this run vs tag {f['tag']['name']}", f["tag"]["diff"]["text"], kind="example", lang="diff")
+    return md
 
 
 def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
@@ -938,6 +974,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
         md += _block(f"{archive}/metadata.yaml", st["metadata"], kind="info", lang="yaml")
     md += _truncation_text(st)
     md += settings_section(st, e)
+    md += friends_section(st)
     return "\n".join(md)
 
 
