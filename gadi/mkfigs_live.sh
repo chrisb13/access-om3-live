@@ -60,11 +60,17 @@ while IFS='=' read -r ENAME OUTDIR NBS; do
     # Model throughput of the completed submissions (access-om3-paper-1's plot_sypd.py, PR #145):
     # first, and straight to the results, so it is updated even if a notebook later fails.
     t0=$SECONDS
+    sypd=""
     if [ -f "$PAPER/notebooks/plot_sypd.py" ] && [ -d "$OUTDIR" ]; then
-        python3 "$PAPER/notebooks/plot_sypd.py" "$OUTDIR" --title "$ENAME" -o "$OUT/sypd.png" \
-            && cp "$OUT/sypd.png" "$RESULTS/"
+        # Up to 3 tries: the conda environment's container occasionally fails to start ("container creation failed")
+        for try in 1 2 3; do
+            python3 "$PAPER/notebooks/plot_sypd.py" "$OUTDIR" --title "$ENAME" -o "$OUT/sypd.png" \
+                && cp "$OUT/sypd.png" "$RESULTS/" && break
+            sypd="failed (try $try)"; sleep 30
+        done
+        [ -s "$OUT/sypd.png" ] && sypd=""
     fi
-    echo "sypd $((SECONDS - t0))" >> "$OUT/timings.txt"
+    echo "sypd $((SECONDS - t0)) $sypd" >> "$OUT/timings.txt"
     t0=$SECONDS
     python3 -m mkfigs.run --ename "$ENAME" --esmdir "$CAT/datastore.json" --wfolder "$PAPER/"
     echo "notebooks $((SECONDS - t0))" >> "$OUT/timings.txt"
