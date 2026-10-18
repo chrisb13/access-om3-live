@@ -20,19 +20,49 @@
 #     description: One line on what this run is testing
 #     issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1755
 experiments:
+  - archive: /g/data/ol01/outputs/access-om3-8km/MC_8km_jra_ryf-test2-expt-c349f800
+    run_dir: /g/data/tm70/cyb561/access-om3-runs/8k/MC_8km_jra_ryf-test2
+    description: 8km jra_ryf-test2
+    issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1755
+  - archive: /scratch/tm70/cyb561/access-om3/archive/MC_8km_jra_ryf-test1-expt-4f2841fe
+    run_dir: /g/data/tm70/cyb561/access-om3-runs/8k/MC_8km_jra_ryf-test1
+    description: 8km jra_ryf-test1
+  - archive: /g/data/ol01/outputs/access-om3-100km/MC_100km_jra_iaf+wombatlite-test1-e1de2a94
+    issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1669
+  - archive: /scratch/tm70/ek4684/access-om3/archive/test1-MCW_100km_era_iaf-908e8682
+    run_dir: /scratch/tm70/ek4684/test1
+    description: MCW beta long-run
+  - archive: /scratch/tm70/hm6113/access-om3/archive/exp2.0_run2-expt-3d030595
+    description: Helens regional superoz 
+  - archive: /scratch/x77/aek156/access-om3/archive/MC_25km_jra_iaf+wombatlite-test5.1-8f50b769
+    run_dir: /home/156/aek156/payu/MC_25km_jra_iaf+wombatlite
+    issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1534
+    description: 25km JRA IAF test "5.1"
+  - archive: /scratch/x77/aek156/access-om3/archive/MC_25km_jra_iaf+wombatlite-test5-38867fcd
+    description: 25km JRA IAF test 5 (stopped)
+  - archive: /scratch/x77/aek156/access-om3/archive/MC_25km_era_iaf+wombatlite-test5-era-8a51ed1d
+    run_dir: /home/156/aek156/payu/MC_25km_era_iaf+wombatlite
+    description: 25km ERA IAF test 5 (stopped)
+  - archive: /g/data/zv30/non-cmip/ACCESS-CM3/cm3-run-27-07-2026-PD-control/cm3-datastore/cm3-datastore.json
+    description: CM3 present day control run. This run uses the GC5-central UM configuration, CMIP6 inputs, and includes several polar and tripolar bugfixes.
+  - archive: /g/data/zv30/non-cmip/ACCESS-CM3/cm3-run-27-07-2026-PI-control/cm3-datastore/cm3-datastore.json
+    description: CM3 pre-industrial control run. This run uses the GC5-central UM configuration, CMIP6 inputs, and includes several polar and tripolar bugfixes.
   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
-  - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test3v2-00532b88
-
-# Notebooks run for every experiment, from this access-om3-paper-1 git ref.
-# (pull/137/head until PR #137, which adds ocean_stats, is merged; then main.)
-paper_ref: pull/137/head
+  
+# Notebooks run for every experiment, from this access-om3-paper-1 commit (a full hash, so
+# nothing changes until it is updated here): PR #137's head, rebased onto main on 2026-10-17.
+# Once PR #137 is merged, use the merge commit on main.
+paper_ref: d2a7f468b45ae5629e3c6af59935c6e9aa4a2dd2
 notebooks:
   - ocean_stats
   - timeseries
   - Timeseries_daily_extreme_from_2D_fields
+  - temp-salt-vs-depth-time
 
 # PBS settings for the nightly job.
 project: tm70
-# Only what the job always needs; each run's own /g/data or /scratch project is added automatically.
-storage: gdata/xp65
+# What the notebooks always need: xp65 (conda environment) and ik11 (the ACCESS-OM2 run
+# that timeseries compares against). Each run's own /g/data or /scratch project is added
+# automatically; add any project that an experiment's own notebooks read from.
+storage: gdata/xp65+gdata/ik11
 conda_module: conda/analysis3-26.08
