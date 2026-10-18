@@ -1,13 +1,20 @@
-# Experiments shown under "Live" on the website. Add or remove an entry to bring a
-# run in or out of focus:
+# Experiments shown under "OM3 Monitor" on the website. Add or remove an entry to bring a
+# run in or out of focus. The keys match the sections of each experiment's status page:
 #   archive    (required) full path to the run's archive folder (holding output000, ...): the
 #              payu archive on /scratch or its synced copy on /g/data. Its folder name is the
 #              experiment's name on the site, so it must be unique.
+#   run_dir    (optional) the payu control directory, for the current or crashed run's logs.
 #   notebooks  (optional) the notebooks to run for this experiment, instead of `notebooks` below.
+#   description (optional) one line for the OM3 Monitor table and the status page; without
+#              it, the first line of the description in the run's metadata.yaml is used.
+#   issue      (optional) the GitHub issue where the run is discussed, linked at the top of its page.
 # An entry with just the archive folder can be written as a plain path:
 #   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
 #   - archive: /g/data/ol01/outputs/access-om3-8km/MC_8km_jra_ryf-test2-expt-c349f800
+#     run_dir: /g/data/tm70/cyb561/access-om3-runs/8k/MC_8km_jra_ryf-test2
 #     notebooks: [MLD, SST]
+#     description: One line on what this run is testing
+#     issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1755
 experiments:
   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test3v2-00532b88

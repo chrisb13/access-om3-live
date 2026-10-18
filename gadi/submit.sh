@@ -39,10 +39,13 @@ add_storage "$(readlink -f "$WORK")"   # config.sh, the paper checkout and outpu
 # Re-run an experiment if it has new .nc output, or its notebooks (commit or list) changed.
 commit=$(git -C "$PAPER" rev-parse HEAD)
 
-rm -rf "$WORK/status" && mkdir -p "$WORK/status"
+# payu, for each run directory's `payu status` (run_status.py); skipped if it isn't available
+command -v payu >/dev/null || { module use /g/data/vk83/modules && module load payu; } >/dev/null 2>&1 || true
+
+rm -rf "$WORK/status" && mkdir -p "$WORK/status"   # one run_status.py snapshot per experiment
 jobids=()
 for i in "${!EXPERIMENTS[@]}"; do
-    path=${EXPERIMENTS[$i]}
+    path=${EXPERIMENTS[$i]} run_dir=${RUN_DIRS[$i]:-}   # run_dir: optional payu control directory (status page only)
     nbs=${EXP_NOTEBOOKS[$i]:-${NOTEBOOKS[*]}}             # this experiment's own list, else the standard one
     key="$commit $nbs"
     e=${NAMES[$i]}   # the experiment's name (see ename in scripts/build_site.py)
@@ -54,6 +57,7 @@ for i in "${!EXPERIMENTS[@]}"; do
         continue
     fi
     add_storage "$out"
+    python3 "$WORK/gadi/run_status.py" "$out" "$WORK/status/$e.json" ${run_dir:+"$run_dir"} || echo "could not read run status for $e" >&2
     # One-off move: results used to be read straight from the paper checkout's mkfigs_output folders.
     old="$PAPER/notebooks/mkfigs_output_$e"
     if [ ! -d "$WORK/results/$e" ] && [ -d "$old" ]; then cp -r "$old" "$WORK/results/$e"; fi

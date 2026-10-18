@@ -77,7 +77,7 @@ jobs:
           python3 -c 'import shlex, sys, yaml
           c = yaml.safe_load(open("experiments.yml"))
           ex = [x if isinstance(x, dict) else {"archive": x} for x in c.pop("experiments")]
-          c["experiments"] = [x["archive"] for x in ex]
+          c["experiments"], c["run_dirs"] = [x["archive"] for x in ex], [x.get("run_dir", "") for x in ex]
           sys.path.insert(0, "scripts"); from build_site import ename
           c["names"] = [ename(p) for p in c["experiments"]]  # experiment names, as the site uses them
           c["exp_notebooks"] = [" ".join(x.get("notebooks", [])) for x in ex]  # replaces `notebooks` when set
