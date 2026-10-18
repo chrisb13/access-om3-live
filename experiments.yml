@@ -1,8 +1,13 @@
-# Experiments shown under "Live" on the website.
-# Add or remove a run to bring it in or out of focus. Give the full path to the
-# run's archive folder (the one holding output000, output001, ...), either the
-# payu archive on /scratch or the synced copy on /g/data. Its folder name is used
-# as the experiment name on the site, so names must be unique.
+# Experiments shown under "Live" on the website. Add or remove an entry to bring a
+# run in or out of focus:
+#   archive    (required) full path to the run's archive folder (holding output000, ...): the
+#              payu archive on /scratch or its synced copy on /g/data. Its folder name is the
+#              experiment's name on the site, so it must be unique.
+#   notebooks  (optional) the notebooks to run for this experiment, instead of `notebooks` below.
+# An entry with just the archive folder can be written as a plain path:
+#   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
+#   - archive: /g/data/ol01/outputs/access-om3-8km/MC_8km_jra_ryf-test2-expt-c349f800
+#     notebooks: [MLD, SST]
 experiments:
   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test3v2-00532b88
