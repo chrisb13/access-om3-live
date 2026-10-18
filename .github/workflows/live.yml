@@ -118,7 +118,7 @@ jobs:
           echo "::group::Copy results and run status from Gadi"
           for e in "${EXPERIMENTS[@]}"; do
             e=$(basename "$e")   # ENAME = name of the archive folder
-            rsync -a --include='mkmd/***' --include='*_rendered.ipynb' --include='sypd.png' --exclude='*' \
+            rsync -a --include='mkmd/***' --include='*_rendered.ipynb' --include='sypd.png' --include='timings.txt' --exclude='*' \
               "$GADI:$WORK/results/$e/" "content/$e/" \
               || echo "::warning::no outputs yet for $e"
           done

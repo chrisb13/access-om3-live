@@ -27,21 +27,42 @@ while IFS='=' read -r ENAME OUTDIR NBS; do
     read -r -a nbs <<< "${NBS:-${NOTEBOOKS[*]}}"
     printf -v MKFIGS_NOTEBOOKS '%s:' "${nbs[@]}"
     export MKFIGS_NOTEBOOKS="${MKFIGS_NOTEBOOKS%:}"
-    # Temporary datastore in jobfs. Its folder must be named ENAME: mkfigs takes the
-    # experiment name from the datastore's parent folder.
-    CAT="$PBS_JOBFS/$ENAME"
-    mkdir -p "$CAT"
-    build-esm-datastore --builder AccessOm3Builder --expt-dir "$OUTDIR" --cat-dir "$CAT" --datastore-name datastore
-
     OUT="$PAPER/notebooks/mkfigs_output_$ENAME" RESULTS="$WORK/results/$ENAME"
     rm -rf "$OUT" && mkdir -p "$OUT" "$RESULTS"   # this run's output only
+    t0=$SECONDS   # timings.txt: seconds spent on each step, for the workflow's run summary
+
+    # Datastore, in a jobfs folder named ENAME (mkfigs takes the experiment name from it).
+    # Reuse the one payu keeps in the archive when it covers the newest output folder and lists
+    # files in this archive; otherwise build our own (minutes, sometimes much longer).
+    CAT="$PBS_JOBFS/$ENAME" newest=$(ls -d "$OUTDIR"/output[0-9]* 2>/dev/null | tail -1) how=built
+    mkdir -p "$CAT"
+    for ds in "$OUTDIR/experiment_datastore.json" "$OUTDIR/datastore.json"; do
+        base=${ds%.json}
+        csv=$(ls "$base".csv* 2>/dev/null | head -1)
+        if [ -r "$ds" ] && [ -n "$csv" ] && [ -n "$newest" ] && [ "$ds" -nt "$newest" ] \
+           && python3 "$WORK/gadi/datastore_ok.py" "$ds" "$csv" "$OUTDIR"; then
+            ln -sf "$ds" "$CAT/datastore.json"
+            ln -sf "$csv" "$CAT/"   # a relative catalog_file in the json is found next to it
+            how="reused ${ds##*/}"
+            break
+        fi
+    done
+    if [ "$how" = built ]; then
+        build-esm-datastore --builder AccessOm3Builder --expt-dir "$OUTDIR" --cat-dir "$CAT" --datastore-name datastore
+    fi
+    echo "datastore $((SECONDS - t0)) $how" >> "$OUT/timings.txt"
+
     # Model throughput of the completed submissions (access-om3-paper-1's plot_sypd.py, PR #145):
     # first, and straight to the results, so it is updated even if a notebook later fails.
+    t0=$SECONDS
     if [ -f "$PAPER/notebooks/plot_sypd.py" ]; then
         python3 "$PAPER/notebooks/plot_sypd.py" "$OUTDIR" --title "$ENAME" -o "$OUT/sypd.png" \
             && cp "$OUT/sypd.png" "$RESULTS/"
     fi
+    echo "sypd $((SECONDS - t0))" >> "$OUT/timings.txt"
+    t0=$SECONDS
     python3 -m mkfigs.run --ename "$ENAME" --esmdir "$CAT/datastore.json" --wfolder "$PAPER/"
+    echo "notebooks $((SECONDS - t0))" >> "$OUT/timings.txt"
     rsync -a --delete "$OUT/" "$RESULTS/"   # publish this run's results as a whole
     mv "$WORK/state/$ENAME.pending" "$WORK/state/$ENAME.stamp"
 done < "${RUN_LIST:-$WORK/run_list}"

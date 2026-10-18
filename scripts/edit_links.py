@@ -11,6 +11,8 @@ def on_page_markdown(markdown, page, config, files):
         page.edit_url = None
     elif src == "index.md":  # the home page is pages/home.md
         page.edit_url = f"{repo}/edit/main/pages/home.md"
+    elif src == "contributing.md":  # pages/contributing.md
+        page.edit_url = f"{repo}/edit/main/pages/contributing.md"
     elif src == "evaluation-summary.md":  # copied from access-om3-configs
         page.edit_url = "https://github.com/ACCESS-NRI/access-om3-configs/edit/main/documentation/docs/pages/Experiments.md"
     elif src.startswith("live/"):  # the monitor and the status pages come from experiments.yml and the nightly run

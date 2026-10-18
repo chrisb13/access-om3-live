@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo
 
 import json
 
+from urllib.parse import urlencode
+
 import yaml
 
 import checks
@@ -23,6 +25,11 @@ CONTENT, THEME, BUILD, STATUS = ROOT / "content", ROOT / "theme" / "documentatio
 CONFIGS_SITE = "https://access-om3-configs.access-hive.org.au/latest/"
 CANBERRA = ZoneInfo("Australia/Canberra")
 REPO = os.environ.get("GITHUB_REPOSITORY", "ACCESS-NRI/access-om3-live")  # set by GitHub Actions
+# A new GitHub issue with a short template filled in (pages/contributing.md links to it)
+ISSUE_URL = f"https://github.com/{REPO}/issues/new?" + urlencode({
+    "title": "Feedback: ",
+    "body": "**Page** (paste its link):\n\n**Experiment** (if it's about a run):\n\n"
+            "**What's wrong, or what would help?**\n\n"})
 
 
 def _sypd(run: dict) -> str:
@@ -975,8 +982,8 @@ def notebook_times(log: Path) -> list:
 def run_summary(experiments: list) -> str:
     """Markdown for the GitHub Actions run summary: per experiment, what this run did, its last notebook job
     and how its notebooks went (from status/<ENAME>.job.json and the job's mkfigs_run.log)."""
-    rows = ["### Notebook jobs\n", "| Experiment | This run | Last job: exit, walltime, memory | Notebooks: OK / failed / "
-            "didn't finish | Slowest notebook |", "|---|---|---|---|---|"]
+    rows = ["### Notebook jobs\n", "| Experiment | This run | Last job: exit, walltime, memory | Time: datastore / SYPD / "
+            "notebooks | Notebooks: OK / failed / didn't finish | Slowest notebook |", "|---|---|---|---|---|---|"]
     for e in experiments:
         job, nbs = _snapshot(STATUS / f"{e}.job.json"), notebook_times(CONTENT / e / "mkmd" / "mkfigs_run.log")
         last = job.get("last") or {}
@@ -988,7 +995,13 @@ def run_summary(experiments: list) -> str:
         counts = " / ".join(str(sum(r == k for _, r, _ in nbs)) for k in ("OK", "FAILED", "didn't finish")) if nbs else "–"
         timed = sorted((t, nb) for nb, _, t in nbs if t is not None)
         slow = f"{timed[-1][1]} ({timed[-1][0]:.1f} min)" if timed else "–"
-        rows.append(f"| {e} | {job.get('decision', '–')} | {res} | {counts} | {slow} |")
+        steps = {}  # timings.txt, written by the job: "<step> <seconds> [how]"
+        tfile = CONTENT / e / "timings.txt"
+        for line in tfile.read_text().splitlines() if tfile.exists() else []:
+            name, secs, *how = line.split()
+            steps[name] = f"{int(secs) / 60:.1f} min" + (f" ({' '.join(how)})" if how else "")
+        took = " / ".join(steps.get(k, "–") for k in ("datastore", "sypd", "notebooks")) if steps else "–"
+        rows.append(f"| {e} | {job.get('decision', '–')} | {res} | {took} | {counts} | {slow} |")
     return "\n".join(rows) + "\n\nExit status 0 means the job finished; -29 means it ran out of walltime.\n"
 
 
@@ -1001,6 +1014,8 @@ def main(summary_md: str) -> None:
     shutil.copytree(THEME / "overrides", BUILD / "overrides")
     shutil.copy2(ROOT / "pages" / "wide.css", docs / "css")
 
+    contributing = (ROOT / "pages" / "contributing.md").read_text()
+    (docs / "contributing.md").write_text(contributing.replace("{repo}", REPO).replace("{issue_url}", ISSUE_URL))
     home = (ROOT / "pages" / "home.md").read_text()
     (docs / "index.md").write_text(home.replace("{repo}", REPO).replace("{notebooks}", ", ".join(cfg["notebooks"])))
     # Evaluation Summary: access-om3-configs' Experiments.md, with site-relative links sent back there,
@@ -1052,6 +1067,11 @@ def main(summary_md: str) -> None:
         "<style>.md-sidebar--secondary:not([hidden]) { display: none }</style>\n\n"
         "# OM3 Monitor\n\nNotebooks re-run nightly on Gadi for runs in progress; an experiment is only re-run "
         "when it has new output. Click an experiment for its run status. Times are Canberra time.\n\n"
+        "!!! warning \"Written with Claude: please check\"\n"
+        "    These pages, and the code that builds them, were written by Claude (an AI assistant) at the "
+        "direction of the ACCESS-OM3 team. They are generated automatically from each run's files, so check "
+        "anything that matters against the run itself on Gadi; each status page has copyable checks for this. "
+        "Please report anything wrong or unclear: see [Contributing and feedback](../contributing.md).\n\n"
         "| Experiment | Description | Latest submission, model date reached | Notebooks last run | Notebooks shown "
         "| Failed |\n|---|---|---|---|---|---|\n"
         + "\n".join(rows) + "\n" + plot + "\n" + help_text)
@@ -1059,7 +1079,8 @@ def main(summary_md: str) -> None:
     if os.environ.get("GITHUB_STEP_SUMMARY"):  # shown at the top of the workflow run's page
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write(run_summary([n for n in names if n != "archive"]))
-    nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Evaluation Summary": "evaluation-summary.md"}]
+    nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Evaluation Summary": "evaluation-summary.md"},
+           {"Contributing and feedback": "contributing.md"}]
     (BUILD / "mkdocs.yml").write_text(yaml.safe_dump({"INHERIT": "../mkdocs.yml", "nav": nav, "hooks": ["../scripts/edit_links.py"]}, sort_keys=False))
 
 

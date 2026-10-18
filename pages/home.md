@@ -19,3 +19,5 @@ It has two parts:
   notebooks. The table is taken directly from the
   [Experiments](https://access-om3-configs.access-hive.org.au/latest/Experiments/) page of the
   access-om3-configs documentation, and is refreshed whenever this site is rebuilt.
+
+Spotted something wrong, or have an idea? See [Contributing and feedback](contributing.md).
