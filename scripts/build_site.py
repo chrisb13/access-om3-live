@@ -25,8 +25,12 @@ CANBERRA = ZoneInfo("Australia/Canberra")
 
 
 def ename(path: str) -> str:
-    """An experiment's name: its archive folder's name."""
-    return Path(path).name
+    """An experiment's name: its archive folder's name; for a datastore given directly (.json, e.g. ACCESS-CM3), the
+    nearest folder above it named differently from the file (.../cm3-run-X/cm3-datastore/cm3-datastore.json -> cm3-run-X)."""
+    p = Path(path)
+    if p.suffix != ".json":
+        return p.name
+    return next((parent.name for parent in p.parents if parent.name and parent.name != p.stem), p.stem)
 
 
 def _sypd(run: dict) -> str:
@@ -938,6 +942,20 @@ def friends_section(st: dict) -> list:
     return md + _check("the closest shared commit and tag", checks.friends(run_dir, f["short"]))
 
 
+def datastore_page(e: str, st: dict, nb_links: str) -> str:
+    """Status page for an experiment given as a datastore (.json, e.g. ACCESS-CM3): what the catalogue says, and its notebooks."""
+    d = st.get("datastore") or {}
+    years = f"{d.get('n_years') or '?'} ({d['years'][0]}–{d['years'][1]})" if d.get("years") else "unknown"
+    return "\n".join([f"# {e}\n"] + ([f"{st['description']}\n"] if st.get("description") else [])
+                     + ([f"**GitHub issue:** {_issue_link(st['issue'])}\n"] if st.get("issue") else []) + [
+        f"**Notebooks:** {nb_links or 'none yet'}\n", "## Datastore\n",
+        f"Read from the datastore given in `experiments.yml`: `{st.get('archive')}`.\n",
+        f"- **Files catalogued:** {d.get('files', 0):,}", f"- **Model years in the catalogue:** {years}",
+        f"- **Datastore last modified:** {_when(d.get('mtime')) or 'unknown'}", "",
+        "This experiment isn't a payu run (ACCESS-CM3, for example, runs with Rose/Cylc), so the run-status sections "
+        "(recent runs, logs, truncations, settings) don't apply here; its notebooks are run on this datastore as it is.\n"])
+
+
 def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
     """Markdown for an experiment's run-status page, from gadi/run_status.py's snapshot."""
     if st.get("no_snapshot"):  # nothing was read from Gadi: say so, rather than showing zeros
@@ -1068,14 +1086,21 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
     (docs / "live" / e).mkdir(parents=True, exist_ok=True)
     if (src / "sypd.png").exists():
         shutil.copy2(src / "sypd.png", docs / "live" / e)
-    (docs / "live" / e / "index.md").write_text(status_page(e, st, links + (f"\n\n{job_note}" if job_note else ""),
+    page = (lambda e, st, links, png: datastore_page(e, st, links)) if st.get("datastore_only") else status_page
+    (docs / "live" / e / "index.md").write_text(page(e, st, links + (f"\n\n{job_note}" if job_note else ""),
                                                             (src / "sypd.png").exists()))
     done = [r for r in st.get("runs", []) if r.get("model_finish")]
     latest = max((r.get("mtime") or 0 for r in st.get("runs", [])), default=0)  # when payu last recorded a run
+    if st.get("datastore_only"):  # e.g. ACCESS-CM3: sorted by when its datastore last changed
+        latest = (st.get("datastore") or {}).get("mtime") or 0
     years, avg = _progress(st.get("runs", []))
     progress = (f" ({years:.0f} years complete" if years and years >= 10 else f" ({years:.1f} years complete" if years else "") + (
         f", avg {avg:.1f} SYPD" if years and avg else "") + (")" if years else "")
+    ds = st.get("datastore") or {}
     reached = ("⚠️ no status snapshot" if st.get("no_snapshot") else
+               "– (datastore given directly" + (f"; {ds.get('n_years') or '?'} model years, {ds['years'][0]}–{ds['years'][1]}"
+                                                 if ds.get("years") else "") + f")<br>{_when(latest)}"
+               if st.get("datastore_only") else
                f"{health(st)[0]} {_date(done[-1]['model_finish']) if done else ''}{progress}<br>{_when(latest)}"
                if st.get("runs") else "–")
     issue = f"[GitHub issue]({st['issue']})" if st.get("issue") else ""

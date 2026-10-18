@@ -3,7 +3,9 @@
 Usage: run_status.py ARCHIVE_DIR OUT.json [RUN_DIR]
 RUN_DIR is the payu control directory: it holds the current (or crashed) run's PBS and model logs.
 """
+import csv
 import glob
+import gzip
 import json
 import math
 import os
@@ -347,8 +349,35 @@ def payu_status(run_dir):
     return p.stdout.strip() if p.returncode == 0 and "Run:" in p.stdout else None
 
 
+def datastore_summary(path):
+    """For an experiment given as an intake-esm datastore (.json), e.g. ACCESS-CM3: its catalogue's file count and years."""
+    out = {"files": 0, "years": None, "mtime": os.path.getmtime(path) if readable(path) else None}
+    try:
+        with open(path) as f:
+            catalog = json.load(f).get("catalog_file") or ""
+        catalog = catalog[len("file://"):] if catalog.startswith("file://") else catalog
+        csv_path = os.path.join(os.path.dirname(path), catalog)
+        with (gzip.open if csv_path.endswith(".gz") else open)(csv_path, "rt") as f:
+            years = set()
+            for row in csv.DictReader(f):
+                out["files"] += 1
+                start = row.get("start_date") or ""
+                if row.get("frequency") != "fx" and start[:4].isdigit():  # fixed files carry placeholder dates
+                    years.add(start[:4])
+        out["years"] = [min(years), max(years)] if years else None
+        out["n_years"] = len(years)
+    except (OSError, ValueError, csv.Error):
+        pass
+    return out
+
+
 def main(archive, dest, run_dir=None):
     """Collect payu run records (payu_jobs/*/run/*.json), output count and recent log tails."""
+    if archive.endswith(".json"):  # an experiment given as its datastore (e.g. ACCESS-CM3): no payu records to read
+        with open(dest + ".tmp", "w") as f:
+            json.dump({"archive": archive, "datastore_only": True, "datastore": datastore_summary(archive)}, f, indent=1)
+        os.replace(dest + ".tmp", dest)
+        return
     runs = []
     for jf in glob.glob(os.path.join(archive, "payu_jobs", "*", "run", "*.json")):
         if not readable(jf):

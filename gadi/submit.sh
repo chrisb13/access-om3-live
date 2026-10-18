@@ -59,7 +59,7 @@ for i in "${!EXPERIMENTS[@]}"; do
     e=${NAMES[$i]}   # the experiment's name (see ename in scripts/build_site.py)
     if [ "$e" = archive ]; then echo "$path: give the folder that 'archive' links to, not the link" >&2; continue; fi
     out=$(readlink -f "$path") || true
-    if [ ! -d "$out" ]; then
+    if [ ! -d "$out" ] && [ ! -f "$out" ]; then   # a folder, or a datastore (.json) given directly
         note "$e" "no output directory found at $path"
         printf '{"decision": "no output folder found at %s"}\n' "$path" > "$WORK/status/$e.job.json"
         continue
@@ -82,7 +82,8 @@ for i in "${!EXPERIMENTS[@]}"; do
         elif [ "$FORCE" = true ]; then reason="forced"
         elif [ ! -e "$stamp" ]; then reason="first run"
         elif [ "$(cat "$stamp")" != "$key" ]; then reason="notebooks or paper commit changed"
-        elif [ -n "$(find "$out" -name '*.nc' -newer "$stamp" -print -quit)" ]; then reason="new output"
+        elif [ -d "$out" ] && [ -n "$(find "$out" -name '*.nc' -newer "$stamp" -print -quit)" ]; then reason="new output"
+        elif [ -f "$out" ] && [ "$out" -nt "$stamp" ]; then reason="datastore updated"
         fi
         if [ -n "$reason" ]; then
             echo "$e=$out=$nbs" > "$WORK/run_lists/$e"

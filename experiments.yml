@@ -2,7 +2,10 @@
 # run in or out of focus. The keys match the sections of each experiment's status page:
 #   archive    (required) full path to the run's archive folder (holding output000, ...): the
 #              payu archive on /scratch or its synced copy on /g/data. Its folder name is the
-#              experiment's name on the site, so it must be unique.
+#              experiment's name on the site, so it must be unique. For a run that isn't a payu
+#              run (e.g. ACCESS-CM3), give its intake-esm datastore (.json) instead: it is used as
+#              it is, and the experiment is named after the nearest folder above the file whose
+#              name differs from the file's.
 #   run_dir    (optional) the payu control directory, for the current or crashed run's logs and the
 #              git history of its settings.
 #   notebooks  (optional) the notebooks to run for this experiment, instead of `notebooks` below.
