@@ -241,19 +241,28 @@ def settings_at(run_dir, sha):
     return out
 
 
-def settings_history(run_dir):
+def settings_history(run_dir, ref="HEAD"):
     """Edits to the tracked settings since payu's first run commit, from the git log of its control directory."""
-    log = git(run_dir, "log", "--first-parent", "--reverse", "--format=%H%x1f%cI%x1f%s")
+    log = git(run_dir, "log", "--first-parent", "--reverse", "--format=%H%x1f%cI%x1f%s", ref)
     if log is None:
         return None
     commits = [line.split("\x1f") for line in log.splitlines() if line.count("\x1f") == 2]
     first = next((i for i, c in enumerate(commits) if RUN_COMMIT.search(c[2])), None)
     if first is None:
         return {"runs": [], "changes": [], "build": {}}
-    touched = set((git(run_dir, "log", "--first-parent", "--format=%H", commits[first][0] + "..HEAD", "--",
+    touched = set((git(run_dir, "log", "--first-parent", "--format=%H", commits[first][0] + ".." + ref, "--",
                        *HISTORY_FILES) or "").split())
+    # payu makes a run commit when it starts a run, so a crashed (or discarded) attempt leaves one too. An attempt is
+    # superseded when a later run commit has the same or a lower number: that run was redone. Edits are dated by the
+    # last run that finished, so an edit made between a crashed attempt and its redo is "after" the run before it.
+    numbers = [(i, int(RUN_COMMIT.search(c[2]).group(1))) for i, c in enumerate(commits) if i >= first and RUN_COMMIT.search(c[2])]
+    superseded, lowest = set(), None
+    for i, n in reversed(numbers):
+        if lowest is not None and lowest <= n:
+            superseded.add(i)
+        lowest = n if lowest is None else min(lowest, n)
     prev, runs, changes, counter = settings_at(run_dir, commits[first][0]), [], [], None
-    for sha, when, subject in commits[first:]:
+    for i, (sha, when, subject) in enumerate(commits[first:], first):
         if sha in touched:  # a run commit can carry edits too (e.g. config.yaml), so diff before counting it
             now = settings_at(run_dir, sha)
             for key in sorted(set(prev) | set(now)):
@@ -264,10 +273,12 @@ def settings_history(run_dir):
             prev = now
         m = RUN_COMMIT.search(subject)
         if m:
-            counter = int(m.group(1))
-            runs.append([when, counter])
+            if i not in superseded:
+                counter = int(m.group(1))
+            runs.append([when, int(m.group(1))])
     build = {key: prev.get(("config.yaml", key), (None,))[0] for key in BUILD_KEYS}  # as of the latest commit
-    return {"runs": runs, "changes": changes, "build": build}
+    return {"runs": runs, "changes": changes, "build": build,
+            "completed": len(numbers) - len(superseded), "redone": sorted(n for i, n in numbers if i in superseded)}
 
 
 # "Where are my friends?": the closest history this run's control directory shares with access-om3-configs,

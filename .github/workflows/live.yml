@@ -85,7 +85,7 @@ jobs:
               print(f"{k.upper()}=" + ("(" + " ".join(map(shlex.quote, v)) + ")" if isinstance(v, list) else shlex.quote(str(v))))' > config.sh
           ssh "$GADI" mkdir -p "$WORK"
           rsync -r gadi config.sh "$GADI:$WORK/"
-          ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA" "$FORCE" submit | tee -a "$GITHUB_OUTPUT"
+          ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA-$(git ls-remote --heads https://github.com/ACCESS-Community-Hub/access-om3-experiments | sha256sum | cut -c1-12)" "$FORCE" submit | tee -a "$GITHUB_OUTPUT"
 
       - name: Wait for the PBS jobs
         if: steps.submit.outputs.jobids != ''
@@ -107,7 +107,7 @@ jobs:
 
       - name: Refresh run status after the jobs
         id: refresh
-        run: ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA" false collect | tee -a "$GITHUB_OUTPUT"
+        run: ssh "$GADI" bash "$WORK/gadi/submit.sh" "$WORK" "$(sha256sum Experiments.md | cut -c1-16)-$GITHUB_SHA-$(git ls-remote --heads https://github.com/ACCESS-Community-Hub/access-om3-experiments | sha256sum | cut -c1-12)" false collect | tee -a "$GITHUB_OUTPUT"
 
       - name: Collect outputs and build site
         if: steps.refresh.outputs.rebuild == 'true'
