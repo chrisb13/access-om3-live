@@ -421,6 +421,17 @@ def _component(c: dict) -> str:
     return "Job setup" if c["file"] == "config.yaml" and _housekeeping(c) else GROUPS[c["group"]][0]
 
 
+def _after(counter) -> str:
+    """When an edit was made, by the last run that had finished."""
+    return f"after run {counter}" if counter is not None else "before the first run finished"
+
+
+def _runs_done(hist: dict, runs: list) -> str:
+    """'19 completed runs, 1 redone': payu's run commits, counting a crashed and redone run once."""
+    done, redone = hist.get("completed", len(runs)), len(hist.get("redone", []))
+    return f"{done} completed runs" + (f", {redone} redone" if redone else "")
+
+
 def _model_date(payu: list, counter) -> str:
     """The model date payu reached at the end of run `counter`, e.g. '1963-01-01', or '?' if it wasn't recorded."""
     done = [r for r in payu if str(r.get("run")) == str(counter) and r.get("model_finish")]
@@ -538,7 +549,7 @@ def _change_lines(c: dict) -> list:
 def _tip_lines(c: dict, label: str) -> list:
     """The lines of a dot's tooltip: what changed, when and why, each on its own line."""
     lines = [f"#{c['n'] + 1}  {label}  ({c['group']})", *_change_lines(c),
-             f"{c['t']:%-d %b %Y %H:%M}  ·  after run {c['counter']}", f"model date {c['model_date']}",
+             f"{c['t']:%-d %b %Y %H:%M}  ·  {_after(c['counter'])}", f"model date {c['model_date']}",
              *textwrap.wrap(c["subject"], 50)[:3]]
     return [x if len(x) <= 60 else x[:59] + "…" for x in lines]
 
@@ -618,7 +629,7 @@ def _timeline(shown: list, runs: list, restarts: list, t0: datetime, t1: datetim
     for t in _ticks(t0, t1):
         parts.append(f'<line x1="{x(t):.1f}" y1="24" x2="{x(t):.1f}" y2="{bottom - 12}" stroke="currentColor" opacity=".12"/>')
         parts.append(f'<text x="{x(t) + 4:.1f}" y="16" font-size="12" opacity=".7">{t:%-d %b}</text>')
-    parts.append(f'<text x="0" y="45" font-size="13" opacity=".7">Completed runs ({len(runs)})</text>')
+    parts.append(f'<text x="0" y="45" font-size="13" opacity=".7">Run commits ({len(runs)})</text>')
     parts += [f'<line x1="{x(t):.1f}" y1="32" x2="{x(t):.1f}" y2="48" stroke="currentColor" opacity=".45"/>'
               for t, _ in runs[::max(1, len(runs) // 400)]]  # one tick per completed run, thinned for very long runs
     parts.append('<text x="0" y="66" font-size="13" opacity=".7">Model year</text>')
@@ -682,7 +693,7 @@ def _timeline(shown: list, runs: list, restarts: list, t0: datetime, t1: datetim
     ly = bottom + 10  # legend: one item per line
     items = [("dot", "an edit; the number is its row in the table below"),
              ("bar", "the setting differs from its value at the first run"),
-             ("tick", "one completed run (a payu run commit); the gaps are pauses between runs"),
+             ("tick", "one run commit (payu makes one when a run starts, so a redone run has two); the gaps are pauses between runs"),
              ("end", "end of the completed runs (the archive folder); to the right is the current or crashed run")]
     if restarts:
         items.append(("restart", "the run counter restarted (a run was redone)"))
@@ -770,7 +781,7 @@ def _build_box(build: dict, shown: list) -> list:
         if cs:
             last = cs[-1]
             where = ", ".join(f"[#{c['n'] + 1}](#chg-{c['n']})" for c in cs)
-            since = (f"changed {len(cs)}×: last after run {last['counter']} ({last['t']:%-d %b %Y}, model date "
+            since = (f"changed {len(cs)}×: last {_after(last['counter'])} ({last['t']:%-d %b %Y}, model date "
                      f"{last['model_date']}); see {where} below")
         else:
             since = "unchanged since the first run"
@@ -799,8 +810,8 @@ def settings_section(st: dict, e: str = "", fragment: bool = False) -> list:
     for n, c in enumerate(shown):
         c["n"], c["link"] = n, _param_link(c, e)  # the link goes to where the setting is documented or set in access-om3-configs
     current = any(c["current"] for c in changes) or bool(payu and payu[-1].get("status") != 0)
-    md.append(_short_intro(runs) if fragment else f"Every edit to the model's settings and build during this experiment, from the git history of the payu control "
-              f"directory (`{st['run_dir']}`), starting at its first run commit ({runs[0][0]:%-d %b %Y}; {len(runs)} completed runs "
+    md.append(_short_intro(runs, hist) if fragment else f"Every edit to the model's settings and build during this experiment, from the git history of the payu control "
+              f"directory (`{st['run_dir']}`), starting at its first run commit ({runs[0][0]:%-d %b %Y}; {_runs_done(hist, runs)} "
               "so far). It covers the **completed runs** (the archive folder above) and the **current or crashed run** (the run "
               "directory above): the dashed vertical line marks where the completed runs end. It reads `MOM_input`, "
               "`MOM_override`, `nuopc.runconfig`, `ice_in` and, from `config.yaml`, the model build (`model`, `exe`, `modules`) "
@@ -820,7 +831,7 @@ def settings_section(st: dict, e: str = "", fragment: bool = False) -> list:
     years = [(t, _year(payu, counter)) for i, (t, counter) in enumerate(runs) if i in (0, len(runs) - 1) or i % 10 == 0]
     years = [(t, yr) for t, yr in years if yr]
     if not shown:
-        md.append(f"No model settings or build entries changed in the {len(runs)} completed runs since the first run commit.\n")
+        md.append(f"No model settings or build entries changed in the {_runs_done(hist, runs)} since the first run commit.\n")
     else:
         settings = {(c["group"], c["key"]) for c in shown}
         end = max([runs[-1][0]] + [c["t"] for c in shown])
@@ -835,7 +846,7 @@ def settings_section(st: dict, e: str = "", fragment: bool = False) -> list:
         else:
             md += [_grid(shown, runs, idx, current, years) + _grid(shown, runs, idx, current, years, 1600, "xwide")
                    + _timeline_narrow(shown, runs, restarts, t0, t1, boundary, current, years)
-                   + "\n", "Each square is one completed run, oldest on the left; a coloured "
+                   + "\n", "Each square is one run commit, oldest on the left; a coloured "
                    "square means settings were edited just before it, and darker means more edits."
                    + (" The dashed line is the end of the completed runs (the archive folder); the last column is the current "
                       "or crashed run." if current else "") + "\n"]
@@ -870,7 +881,7 @@ def _timeline_narrow(shown: list, runs: list, restarts: list, t0: datetime, t1: 
                      f'<text x="{x(t) + 3:.1f}" y="13" font-size="11" opacity=".7">{t:%-d %b}</text>')
     parts += [f'<line x1="{x(t):.1f}" y1="24" x2="{x(t):.1f}" y2="36" stroke="currentColor" opacity=".45"/>'
               for t, _ in runs[::max(1, len(runs) // 300)]]
-    parts.append(f'<text x="{X0}" y="50" font-size="11" opacity=".75">Completed runs ({len(runs)}), model year below</text>')
+    parts.append(f'<text x="{X0}" y="50" font-size="11" opacity=".75">Run commits ({len(runs)}), model year below</text>')
     last = -99.0
     for t, yr in years:
         if x(t) - last >= 34:
@@ -932,10 +943,10 @@ def _timeline_narrow(shown: list, runs: list, restarts: list, t0: datetime, t1: 
     return _svg(W, ly + 62, parts, "Timeline of edits, one strip per setting", "narrow")
 
 
-def _short_intro(runs: list) -> str:
+def _short_intro(runs: list, hist: dict) -> str:
     """The one-paragraph introduction for an experiment's history on the Config Diff page."""
     return ("From the git history of this experiment's branch in access-om3-experiments, starting at its first run commit "
-            f"({runs[0][0]:%-d %b %Y}; {len(runs)} completed runs). Each numbered dot is one edit: tap it to jump to its row in "
+            f"({runs[0][0]:%-d %b %Y}; {_runs_done(hist, runs)}). Each numbered dot is one edit: tap it to jump to its row in "
             "the table, which gives the old and new value and the commit message.\n")
 
 
