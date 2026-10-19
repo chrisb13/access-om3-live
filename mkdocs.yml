@@ -76,3 +76,7 @@ extra_css:
   - fontello/css/fontello.css
   - css/custom.css
   - css/wide.css   # from pages/wide.css
+  - css/config_diff.css   # from pages/
+
+extra_javascript:
+  - js/config_diff.js   # from pages/

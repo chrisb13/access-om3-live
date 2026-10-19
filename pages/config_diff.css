@@ -1,0 +1,58 @@
+/* Config Diff page: works from a phone upwards. */
+#mid .pair, #mid .row2 { display: flex; flex-direction: column; gap: .6rem; }
+#mid .row2 { margin: .8rem 0; }
+@media (min-width: 700px) {
+  #mid .pair { flex-direction: row; align-items: flex-end; }
+  #mid .field { flex: 1; }
+  #mid .row2 { flex-direction: row; align-items: flex-end; }
+}
+#mid label.l { display: block; font-size: .65rem; text-transform: uppercase; letter-spacing: .04em; opacity: .7; margin-bottom: .2rem; }
+#mid select, #mid input[type=text] { width: 100%; box-sizing: border-box; font: inherit; font-size: .8rem; padding: .55rem .6rem; min-height: 44px; color: inherit; background: var(--md-default-bg-color); border: 1px solid var(--md-default-fg-color--lighter); border-radius: 4px; }
+#mid .a select { border-left: 4px solid #2b8cbe; }
+#mid .b select { border-left: 4px solid #d95f0e; }
+#mid button { font: inherit; font-size: .8rem; min-height: 44px; padding: 0 1rem; color: inherit; background: var(--md-default-bg-color); border: 1px solid var(--md-default-fg-color--lighter); border-radius: 4px; cursor: pointer; }
+#mid .chk { display: flex; align-items: center; gap: .5rem; min-height: 44px; font-size: .8rem; }
+#mid .chk input { width: 20px; height: 20px; }
+.chip { display: inline-block; min-width: 1.5em; text-align: center; border-radius: 4px; color: #fff; font-weight: 600; padding: 0 .35em; margin-right: .3em; }
+.chip.a { background: #2b8cbe; }
+.chip.b { background: #d95f0e; }
+#config-diff .hint, #config-diff .refs, #config-diff .count { font-size: .75rem; opacity: .8; }
+table.diff { width: 100%; border-collapse: collapse; font-size: .72rem; display: table; }
+table.diff th { text-align: left; font-size: .65rem; text-transform: uppercase; opacity: .75; padding: .5rem .6rem; border-bottom: 1px solid var(--md-default-fg-color--lighter); }
+table.diff td { padding: .35rem .6rem; border-bottom: 1px solid var(--md-default-fg-color--lightest); vertical-align: top; overflow-wrap: anywhere; font-family: var(--md-code-font-family); }
+table.diff tr.mod td { padding-top: 1rem; opacity: .7; border-bottom: 0; }
+table.diff td a { color: inherit; }
+table.diff td.a { background: rgba(43, 140, 190, .13); }
+table.diff td.b { background: rgba(217, 95, 14, .13); }
+table.diff td.unset { font-style: italic; opacity: .7; }
+#hist { margin-top: 1.2rem; }
+#hist-body h3 { margin: 1.2rem 0 .4rem; font-size: 1rem; }
+@media (max-width: 640px) {
+  /* each parameter becomes a card */
+  table.diff thead { display: none; }
+  table.diff, table.diff tbody, table.diff tr, table.diff td { display: block; width: 100%; box-sizing: border-box; }
+  table.diff tr.param { border: 1px solid var(--md-default-fg-color--lightest); border-radius: 6px; margin: .45rem 0; padding: .3rem .5rem; }
+  table.diff td { border: 0; padding: .18rem 0; }
+  table.diff tr.mod td { padding: .9rem 0 .1rem; }
+  table.diff td.units { font-size: .65rem; opacity: .7; }
+  table.diff td.val { padding: .25rem .4rem; border-radius: 3px; margin: .1rem 0; }
+  table.diff td.val::before { content: attr(data-label) "  "; font-weight: 700; font-family: var(--md-text-font-family); }
+  /* and so do the history tables: number and setting, the change, date and run, the commit message */
+  #hist-body table, #hist-body tbody, #hist-body td { display: block !important; width: 100% !important; box-sizing: border-box; }
+  #hist-body thead, #hist-body colgroup { display: none !important; }
+  #hist-body .md-typeset__table, #hist-body .settings-table { display: block; width: 100%; }
+  #hist-body tbody tr { display: -webkit-flex !important; display: flex !important; -webkit-flex-wrap: wrap; flex-wrap: wrap; width: 100%; box-sizing: border-box; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 6px; margin: .4rem 0; padding: .35rem .5rem; }
+  #hist-body tbody td { border: 0 !important; padding: .1rem 0 !important; font-size: .74rem; -webkit-flex: none; flex: none; }
+  #hist-body td::before { display: none; }
+  #hist-body td[data-label="#"] { -webkit-order: 1; order: 1; width: 12% !important; font-weight: 700; }
+  #hist-body td[data-label="Setting"], #hist-body td[data-label^="Entry"] { -webkit-order: 2; order: 2; width: 88% !important; font-weight: 600; }
+  #hist-body td[data-label^="Entry"] { width: 100% !important; }
+  #hist-body td[data-label="Change"], #hist-body td[data-label="Now"] { -webkit-order: 3; order: 3; width: 100% !important; }
+  #hist-body td[data-label="Now"]::before { display: inline; content: "now: "; opacity: .65; font-size: .68rem; }
+  #hist-body td[data-label="When"] { -webkit-order: 4; order: 4; width: 50% !important; font-size: .68rem; opacity: .8; }
+  #hist-body td[data-label^="After run"] { -webkit-order: 5; order: 5; width: 50% !important; font-size: .68rem; opacity: .8; }
+  #hist-body td[data-label^="After run"]::before { display: inline; content: "after run "; }
+  #hist-body td[data-label="Commit"], #hist-body td[data-label="Changes"] { -webkit-order: 6; order: 6; width: 100% !important; font-size: .7rem; opacity: .9; }
+  #hist-body td[data-label="Component"] { display: none !important; }
+  #hist-body .admonition { margin-left: 0; margin-right: 0; padding-left: .4rem; padding-right: .4rem; }
+}

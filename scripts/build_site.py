@@ -2,6 +2,7 @@
 import os
 import re
 import shutil
+import tempfile
 import sys
 import textwrap
 import traceback
@@ -16,9 +17,11 @@ import json
 
 from urllib.parse import quote, urlencode
 
+import markdown
 import yaml
 
 import checks
+import config_diff_data
 
 ROOT = Path(__file__).resolve().parent.parent
 CONTENT, THEME, BUILD, STATUS = ROOT / "content", ROOT / "theme" / "documentation", ROOT / "build", ROOT / "status"
@@ -163,9 +166,9 @@ def _block(title: str, text: str, kind: str = "note", lang: str = "text", opts: 
             f"    {fence}", ""]
 
 
-def _check(title: str, code: str) -> list:
-    """A collapsed block with a snippet to re-check a statement on Gadi (the code block gets a copy button)."""
-    return _block(f"Check this on Gadi: {title}", code, kind="tip", lang="bash")
+def _check(title: str, code: str, where: str = "on Gadi") -> list:
+    """A collapsed block with a snippet to re-check a statement (the code block gets a copy button)."""
+    return _block(f"Check this {where}: {title}", code, kind="tip", lang="bash")
 
 
 # Syntax highlighting for the run directory's configuration files (Fortran for namelist-style files)
@@ -582,9 +585,9 @@ def _label(key: str, group: str, keys: list) -> str:
     return short if sum(k.rsplit(".", 1)[-1] == short for k in keys) < 2 else key
 
 
-def _svg(width: int, height: int, parts: list, label: str) -> str:
+def _svg(width: int, height: int, parts: list, label: str, cls: str = "wide") -> str:
     """One inline SVG block (no blank lines, so Markdown leaves it alone)."""
-    return (f'<div class="settings-chart"><svg viewBox="0 0 {width} {height}" fill="currentColor" role="img" aria-label="{escape(label)}">'
+    return (f'<div class="settings-chart {cls}"><svg viewBox="0 0 {width} {height}" fill="currentColor" role="img" aria-label="{escape(label)}">'
             + "\n".join(parts) + "</svg></div>")
 
 
@@ -697,7 +700,7 @@ def _timeline(shown: list, runs: list, restarts: list, t0: datetime, t1: datetim
                         f'{escape(x_)}</text>' for i, x_ in enumerate(lines))
         parts.append(f'<g class="tip t{n}"><rect x="{tx:.1f}" y="{ty:.1f}" width="{w:.1f}" height="{h}" rx="6" '
                      f'style="fill:var(--md-default-bg-color);stroke:var(--md-default-fg-color--light)" stroke-width="1.2"/>{body}</g>')
-    return _svg(W, ly + 26 * len(items) + 6, parts, "Timeline of edits to the model build, input files and settings, one row per setting")
+    return _svg(W, ly + 26 * len(items) + 6, parts, "Timeline of edits to the model build, input files and settings, one row per setting", "wide")
 
 
 def _grid(shown: list, runs: list, restarts: list, current: bool, years: list) -> str:
@@ -740,7 +743,7 @@ def _grid(shown: list, runs: list, restarts: list, current: bool, years: list) -
         bx = X0 + n * pitch - .5
         parts.append(f'<line x1="{bx:.1f}" y1="36" x2="{bx:.1f}" y2="{44 + 30 * len(GROUPS)}" stroke="currentColor" opacity=".8" '
                      'stroke-width="1.5" stroke-dasharray="7 4"/>')
-    return _svg(920, 56 + 30 * len(GROUPS), parts, "Grid of runs, shaded where the build or settings were edited just before the run")
+    return _svg(920, 56 + 30 * len(GROUPS), parts, "Grid of runs, shaded where the build or settings were edited just before the run", "wide")
 
 
 def _build_box(build: dict, shown: list) -> list:
@@ -765,10 +768,10 @@ def _build_box(build: dict, shown: list) -> list:
     return ['!!! info "Current build"', ""] + ["    " + r for r in rows] + [""]
 
 
-def settings_section(st: dict, e: str = "") -> list:
+def settings_section(st: dict, e: str = "", fragment: bool = False) -> list:
     """'Settings changed during this run': the current build, a timeline (or run grid if many settings) covering the
     archived runs and the current one, the table of edits, and the collapsed housekeeping list."""
-    md, hist, payu = ["## Settings changed during this run\n"], st.get("settings"), st.get("runs", [])
+    md, hist, payu = ([] if fragment else ["## Settings changed during this run\n"]), st.get("settings"), st.get("runs", [])
     if not st.get("run_dir"):
         return md + ["This comes from the git history of the payu control directory, and this experiment has no `run_dir` in "
                      "`experiments.yml`. Add one to see here every edit made to the model's settings and build during the "
@@ -786,7 +789,7 @@ def settings_section(st: dict, e: str = "") -> list:
     for n, c in enumerate(shown):
         c["n"], c["link"] = n, _param_link(c, e)  # the link goes to where the setting is documented or set in access-om3-configs
     current = any(c["current"] for c in changes) or bool(payu and payu[-1].get("status") != 0)
-    md.append(f"Every edit to the model's settings and build during this experiment, from the git history of the payu control "
+    md.append(_short_intro(runs) if fragment else f"Every edit to the model's settings and build during this experiment, from the git history of the payu control "
               f"directory (`{st['run_dir']}`), starting at its first run commit ({runs[0][0]:%-d %b %Y}; {len(runs)} completed runs "
               "so far). It covers the **completed runs** (the archive folder above) and the **current or crashed run** (the run "
               "directory above): the dashed vertical line marks where the completed runs end. It reads `MOM_input`, "
@@ -815,9 +818,11 @@ def settings_section(st: dict, e: str = "") -> list:
         pad = max((end - runs[0][0]).total_seconds() * 0.03, 3600)
         t0, t1 = runs[0][0] - timedelta(seconds=pad), end + timedelta(seconds=pad)
         if len(settings) <= TIMELINE_MAX_SETTINGS:
-            md.append(_timeline(shown, runs, restarts, t0, t1, boundary, current, years) + "\n")
+            md.append(_timeline(shown, runs, restarts, t0, t1, boundary, current, years)
+                      + _timeline_narrow(shown, runs, restarts, t0, t1, boundary, current, years) + "\n")
         else:
-            md += [_grid(shown, runs, idx, current, years) + "\n", "Each square is one completed run, oldest on the left; a coloured "
+            md += [_grid(shown, runs, idx, current, years) + _timeline_narrow(shown, runs, restarts, t0, t1, boundary, current, years)
+                   + "\n", "Each square is one completed run, oldest on the left; a coloured "
                    "square means settings were edited just before it, and darker means more edits."
                    + (" The dashed line is the end of the completed runs (the archive folder); the last column is the current "
                       "or crashed run." if current else "") + "\n"]
@@ -826,7 +831,126 @@ def settings_section(st: dict, e: str = "") -> list:
         md += [f'??? note "Housekeeping: {len(hidden)} changes to {len({c["key"] for c in hidden})} settings in '
                f'{len({c["sha"] for c in hidden})} commits (job setup, paths, diagnostic output)"']
         md += ["    " + line for line in _md_table(hidden)] + [""]
+    if fragment:  # no run_dir to check: anyone can clone the branch instead
+        return md + _check("every edit listed here, from a clone of the branch", checks.settings_changes_branch(e), "with git")
     return md + _check("the build and every edit listed here", checks.settings_changes(st["run_dir"]))
+
+
+def _timeline_narrow(shown: list, runs: list, restarts: list, t0: datetime, t1: datetime, boundary: datetime,
+                     current: bool, years: list) -> str:
+    """The phone version of the timeline: each setting's name above a full-width strip, so nothing needs a side column."""
+    W, X0, X1 = 420, 14, 406
+    span = (t1 - t0).total_seconds()
+    x = lambda t: X0 + (t - t0).total_seconds() / span * (X1 - X0)
+    norm = lambda v: None if v is None else v.strip().strip("\"'").lower()
+    groups, y = [], 100
+    for g, (title, files, colour) in GROUPS.items():
+        keys = list(dict.fromkeys(c["key"] for c in shown if c["group"] == g))
+        groups.append((g, title, files, colour, keys, y))
+        y += (30 + 52 * len(keys) if keys else 46) + 8
+    bottom, bx, parts = y, x(boundary), []
+    if current:
+        parts.append(f'<rect x="{bx:.1f}" y="26" width="{X1 - bx:.1f}" height="{bottom - 36}" fill="currentColor" opacity=".07"/>')
+    ticks = _ticks(t0, t1)
+    for t in (ticks[::2] if len(ticks) > 5 else ticks):
+        parts.append(f'<line x1="{x(t):.1f}" y1="20" x2="{x(t):.1f}" y2="{bottom - 8}" stroke="currentColor" opacity=".12"/>'
+                     f'<text x="{x(t) + 3:.1f}" y="13" font-size="11" opacity=".7">{t:%-d %b}</text>')
+    parts += [f'<line x1="{x(t):.1f}" y1="24" x2="{x(t):.1f}" y2="36" stroke="currentColor" opacity=".45"/>'
+              for t, _ in runs[::max(1, len(runs) // 300)]]
+    parts.append(f'<text x="{X0}" y="50" font-size="11" opacity=".75">Completed runs ({len(runs)}), model year below</text>')
+    last = -99.0
+    for t, yr in years:
+        if x(t) - last >= 34:
+            parts.append(f'<text x="{x(t):.1f}" y="63" font-size="10" opacity=".85" text-anchor="middle">{yr}</text>')
+            last = x(t)
+    parts += [f'<line x1="{x(t):.1f}" y1="26" x2="{x(t):.1f}" y2="{bottom - 8}" stroke="currentColor" opacity=".4" stroke-dasharray="3 4"/>'
+              for t in restarts]
+    parts.append(f'<line x1="{bx:.1f}" y1="26" x2="{bx:.1f}" y2="{bottom - 8}" stroke="currentColor" opacity=".8" stroke-width="1.5" '
+                 'stroke-dasharray="7 4"/>')
+    parts.append(f'<text x="{bx - 5:.1f}" y="82" font-size="11" text-anchor="end" opacity=".85">◂ archive</text>')
+    if current:
+        parts.append(f'<text x="{bx + 5:.1f}" y="82" font-size="11" opacity=".85">current run ▸</text>')
+    for g, title, files, colour, keys, top in groups:
+        parts.append(f'<text x="{X0}" y="{top + 14}" font-size="13" font-weight="600" fill="{colour}">{title}</text>')
+        if not keys:
+            parts.append(f'<text x="{X0}" y="{top + 34}" font-size="12" opacity=".7">no changes</text>')
+        for r, key in enumerate(keys):
+            yb = top + 30 + 52 * r
+            es = [c for c in shown if c["group"] == g and c["key"] == key]
+            label = _label(key, g, keys)
+            text = f'<text class="mono" x="{X0}" y="{yb + 12}" font-size="12">{escape(label if len(label) <= 26 else label[:25] + "…")}</text>'
+            link = next((c["link"] for c in es if c.get("link")), None)
+            parts.append(f'<a href="{escape(link)}" target="_blank" rel="noopener">{text}</a>' if link else text)
+            now = _short(key, es[0]["old"], es[-1]["new"])
+            parts.append(f'<text class="mono" x="{X1}" y="{yb + 12}" font-size="11" text-anchor="end" opacity=".85">'
+                         f'{escape(now if len(now) <= 30 else now[:29] + "…")}</text>')
+            yc = yb + 30
+            parts.append(f'<line x1="{X0}" y1="{yc}" x2="{X1}" y2="{yc}" stroke="currentColor" opacity=".15"/>')
+            first, start, cur = norm(es[0]["old"]), None, norm(es[0]["old"])
+            for c in es:
+                new = norm(c["new"])
+                if cur == first and new != first:
+                    start = c["t"]
+                if cur != first and new == first:
+                    parts.append(f'<rect x="{x(start):.1f}" y="{yc - 4}" width="{max(x(c["t"]) - x(start), 2):.1f}" height="8" rx="2" '
+                                 f'fill="{colour}" opacity=".25"/>')
+                    start = None
+                cur = new
+            if start is not None:
+                parts.append(f'<rect x="{x(start):.1f}" y="{yc - 4}" width="{max(X1 - x(start), 2):.1f}" height="8" rx="2" '
+                             f'fill="{colour}" opacity=".25"/>')
+            prev = -99.0
+            for c in es:
+                cx = max(x(c["t"]), prev + 17)
+                prev = cx
+                parts.append(f'<a href="#chg-{c["n"]}"><circle cx="{cx:.1f}" cy="{yc}" r="8" fill="{colour}" stroke-width="2" '
+                             f'style="stroke:var(--md-default-bg-color)"/><text x="{cx:.1f}" y="{yc + 3}" font-size="9" font-weight="600" '
+                             f'text-anchor="middle" fill="#fff" style="pointer-events:none">{c["n"] + 1}</text></a>')
+    ly = bottom + 6
+    for i, (kind, label) in enumerate([("dot", "an edit: tap its number to jump to its row below"), ("bar", "differs from the first run"),
+                                       ("end", "end of the completed runs; right of it is the current run")]):
+        yy = ly + 20 * i
+        icon = {"dot": f'<circle cx="8" cy="{yy}" r="8" fill="currentColor" opacity=".6"/><text x="8" y="{yy + 3}" font-size="9" '
+                       f'font-weight="600" text-anchor="middle" style="fill:var(--md-default-bg-color)">1</text>',
+                "bar": f'<rect x="0" y="{yy - 4}" width="16" height="8" rx="2" fill="currentColor" opacity=".25"/>',
+                "end": f'<line x1="8" y1="{yy - 8}" x2="8" y2="{yy + 8}" stroke="currentColor" opacity=".8" stroke-width="1.5" '
+                       'stroke-dasharray="5 3"/>'}[kind]
+        parts.append(f'{icon}<text x="24" y="{yy + 4}" font-size="11" opacity=".8">{label}</text>')
+    return _svg(W, ly + 62, parts, "Timeline of edits, one strip per setting", "narrow")
+
+
+def _short_intro(runs: list) -> str:
+    """The one-paragraph introduction for an experiment's history on the Config Diff page."""
+    return ("From the git history of this experiment's branch in access-om3-experiments, starting at its first run commit "
+            f"({runs[0][0]:%-d %b %Y}; {len(runs)} completed runs). Each numbered dot is one edit: tap it to jump to its row in "
+            "the table, which gives the old and new value and the commit message.\n")
+
+
+def settings_fragment(exp: dict) -> str:
+    """HTML of one experiment's settings history for the Config Diff page: the status page's section, without its
+    heading, with a short introduction and a check that anyone can run by cloning the branch."""
+    st = {"run_dir": f"branch {exp['branch']}", "settings": exp["history"], "runs": exp["runs"]}
+    md = "\n".join(settings_section(st, exp["branch"], fragment=True))
+    return markdown.Markdown(extensions=["admonition", "pymdownx.details", "pymdownx.superfences", "pymdownx.highlight",
+                                         "tables", "md_in_html", "attr_list"]).convert(md)
+
+
+def write_config_diff_data(summary_md: str, out: Path) -> None:
+    """For the Config Diff page: index.json, and per experiment <slug>.json (its parameters) and <slug>.html (its
+    settings history). If the data can't be read, the page is left with an empty list and the site still builds."""
+    out.mkdir(parents=True, exist_ok=True)
+    index = []
+    try:
+        with tempfile.TemporaryDirectory() as work:
+            for x in config_diff_data.collect(Path(summary_md).read_text(), Path(work)):
+                (out / f"{x['slug']}.json").write_text(json.dumps(x["params"], separators=(",", ":")))
+                (out / f"{x['slug']}.html").write_text(settings_fragment(x))
+                index.append({"slug": x["slug"], "label": x["branch"], "group": x["group"], "sha": x["sha"]})
+    except Exception as err:
+        print(f"::error::the Config Diff page has no data: {err!r}")
+        traceback.print_exc()
+    (out / "index.json").write_text(json.dumps(index, indent=1))
+    print(f"Config Diff: {len(index)} experiments")
 
 
 CONFIGS_URL = "https://github.com/ACCESS-NRI/access-om3-configs"
@@ -1156,6 +1280,12 @@ def main(summary_md: str) -> None:
     shutil.copytree(THEME / "docs", docs, ignore=shutil.ignore_patterns("pages"))
     shutil.copytree(THEME / "overrides", BUILD / "overrides")
     shutil.copy2(ROOT / "pages" / "wide.css", docs / "css")
+    # Config Diff page: every Experiments-table branch's MOM_input, and its settings history, fetched by the page
+    shutil.copy2(ROOT / "pages" / "config_diff.css", docs / "css")
+    (docs / "js").mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "pages" / "config_diff.js", docs / "js")
+    shutil.copy2(ROOT / "pages" / "config-diff.md", docs)
+    write_config_diff_data(summary_md, docs / "assets" / "config_diff")
 
     contributing = (ROOT / "pages" / "contributing.md").read_text()
     (docs / "contributing.md").write_text(contributing.replace("{repo}", REPO).replace("{issue_url}", ISSUE_URL))
@@ -1225,7 +1355,7 @@ def main(summary_md: str) -> None:
     if os.environ.get("GITHUB_STEP_SUMMARY"):  # shown at the top of the workflow run's page
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write(run_summary([n for n in names if n != "archive"]))
-    nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Evaluation Summary": "evaluation-summary.md"},
+    nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Config Diff": "config-diff.md"}, {"Evaluation Summary": "evaluation-summary.md"},
            {"Contributing and feedback": "contributing.md"}]
     (BUILD / "mkdocs.yml").write_text(yaml.safe_dump({"INHERIT": "../mkdocs.yml", "nav": nav, "hooks": ["../scripts/edit_links.py"]}, sort_keys=False))
 
