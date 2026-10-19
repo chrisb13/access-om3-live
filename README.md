@@ -31,6 +31,18 @@ changed. The site is only rebuilt when something ran, the list of runs changed, 
 [Experiments page](https://access-om3-configs.access-hive.org.au/latest/Experiments/) changed.
 Use **Run workflow → force** to re-run everything.
 
+## Previewing a pull request
+
+Read the Docs builds a preview of every pull request (see `.readthedocs.yaml`); the link is in a comment on the pull
+request. It has everything except the OM3 Monitor's results, which need the nightly Gadi run. To build the same preview
+yourself:
+
+```bash
+pip install -r requirements.txt
+bash scripts/build_preview.sh
+python3 -m http.server -d build/site     # then open http://localhost:8000/
+```
+
 ## Set-up
 
 Repository secrets: `GADI_USER`, `GADI_KEY` (and `GADI_KEY_PASSPHRASE` if the key has one),
