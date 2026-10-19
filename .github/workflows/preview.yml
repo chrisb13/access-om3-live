@@ -1,0 +1,41 @@
+name: Preview build
+
+# Builds the site for a pull request (no Gadi needed, so no secrets) and attaches it as an artifact.
+on:
+  pull_request:
+    paths: [pages/**, scripts/**, mkdocs.yml, requirements.txt, .github/workflows/preview.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: pip install -r requirements.txt
+
+      - name: Build the site without notebook output
+        env:
+          SITE_URL: http://localhost:8000/
+        run: bash scripts/build_preview.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: preview-site
+          path: build/site
+
+      - run: |
+          {
+            echo "Preview this pull request's site:"
+            echo '```bash'
+            echo "gh run download $GITHUB_RUN_ID -R $GITHUB_REPOSITORY -n preview-site -D preview"
+            echo "python3 -m http.server -d preview"
+            echo '```'
+            echo "then open http://localhost:8000/. (OM3 Monitor pages are empty here: they need the nightly Gadi run.)"
+          } >> "$GITHUB_STEP_SUMMARY"
