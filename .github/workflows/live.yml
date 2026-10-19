@@ -111,6 +111,8 @@ jobs:
 
       - name: Collect outputs and build site
         if: steps.refresh.outputs.rebuild == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}   # to find a pre-release's announcement on GitHub
         run: |
           set -euo pipefail
           source config.sh

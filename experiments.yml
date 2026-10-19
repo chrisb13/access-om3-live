@@ -3,7 +3,8 @@
 #   archive    (required) full path to the run's archive folder (holding output000, ...): the
 #              payu archive on /scratch or its synced copy on /g/data. Its folder name is the
 #              experiment's name on the site, so it must be unique.
-#   run_dir    (optional) the payu control directory, for the current or crashed run's logs.
+#   run_dir    (optional) the payu control directory, for the current or crashed run's logs and the
+#              git history of its settings.
 #   notebooks  (optional) the notebooks to run for this experiment, instead of `notebooks` below.
 #   description (optional) one line for the OM3 Monitor table and the status page; without
 #              it, the first line of the description in the run's metadata.yaml is used.

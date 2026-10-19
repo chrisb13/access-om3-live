@@ -5,6 +5,7 @@ RUN_DIR is the payu control directory: it holds the current (or crashed) run's P
 """
 import glob
 import json
+import math
 import os
 import re
 import subprocess
@@ -129,6 +130,155 @@ def truncations(outputs):
          "top_e": b["top_e"], "depth": b["depth"], "capped": bool(b["pes"] & capped)} for k, b in ranked[:20]]}
 
 
+# Settings history: edits to these files in the control directory's git log, after payu's first run commit.
+HISTORY_FILES = ("config.yaml", "MOM_input", "MOM_override", "nuopc.runconfig", "ice_in")
+BUILD_KEYS = ("model", "exe", "modules.use", "modules.load")  # the config.yaml entries that say which model build ran
+RUN_COMMIT = re.compile(r": Run (\d+)$")  # payu's per-run commit message, e.g. "2026-06-30 20:11:46: Run 65"
+
+
+def git(run_dir, *args):
+    """Output of a git command in run_dir, or None if it fails."""
+    try:
+        # safe.directory: some run directories belong to other accounts, which git otherwise refuses to read
+        p = subprocess.run(("git", "-c", "safe.directory=" + run_dir, "-C", run_dir) + args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           universal_newlines=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return p.stdout if p.returncode == 0 else None
+
+
+def parse_params(text):
+    """MOM_input or MOM_override: {NAME: value} from unindented 'NAME = value ! comment' lines."""
+    out = {}
+    for line in text.splitlines():
+        m = re.match(r"(?:#override\s+)?([A-Za-z]\w*(?:%\w+)*)\s*=\s*([^!]*)", line)
+        if m:
+            out[m.group(1)] = m.group(2).strip()
+    return out
+
+
+def parse_runconfig(text):
+    """nuopc.runconfig: {'SECTION.key': value} from the 'SECTION::' blocks."""
+    out, section = {}, None
+    for line in text.splitlines():
+        s = line.strip()
+        if s == "::":
+            section = None
+        elif s.endswith("::"):
+            section = s[:-2]
+        elif section and "=" in s:
+            key, value = s.split("=", 1)
+            out[section + "." + key.strip()] = value.strip()
+    return out
+
+
+def parse_namelist(text):
+    """ice_in (Fortran namelist): {'group.key': value}; several 'key = value' pairs may share a line."""
+    out, group = {}, None
+    for line in text.splitlines():
+        s = line.split("!", 1)[0].strip()
+        if s.startswith("&"):
+            group = s[1:].split()[0] if s[1:].split() else None
+        elif s == "/":
+            group = None
+        elif group:
+            for m in re.finditer(r"(\w+)\s*=\s*(.*?)(?=,\s*\w+\s*=|$)", s):
+                out[group + "." + m.group(1)] = m.group(2).strip().rstrip(",").strip()
+    return out
+
+
+def parse_config(text):
+    """config.yaml: {'a.b': value} for plain maps, lists and scalars; list items are joined with ', '."""
+    out, stack = {}, []  # stack: (indent, key) of the enclosing keys
+    for raw in text.splitlines():
+        line = raw.split(" #", 1)[0].rstrip()
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s.startswith("- "):
+            key = ".".join(k for _, k in stack)
+            out[key] = (out[key] + ", " if out.get(key) else "") + s[2:].strip()
+            continue
+        indent = len(line) - len(line.lstrip())
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        key, _, value = s.partition(":")
+        stack.append((indent, key.strip()))
+        if value.strip():
+            out[".".join(k for _, k in stack)] = value.strip()
+    return out
+
+
+def norm(value):
+    """Comparable form of a value, so formatting alone (quotes, case, 1.0E-04 vs 0.0001) is not a change."""
+    if value is None:
+        return None
+    s = value.strip().strip("\"'").strip().lower()
+    s = {".true.": "true", ".false.": "false"}.get(s, s)
+    try:
+        number = float(s.replace("d", "e"))
+    except ValueError:
+        return s
+    return number if math.isfinite(number) else s
+
+
+def settings_at(run_dir, sha):
+    """{(file, key): (value, source file)} for the tracked files at a commit; MOM_override wins over MOM_input."""
+    out = {}
+    for name, parse in (("config.yaml", parse_config), ("MOM_input", parse_params), ("MOM_override", parse_params),
+                        ("nuopc.runconfig", parse_runconfig), ("ice_in", parse_namelist)):
+        for key, value in parse(git(run_dir, "show", "%s:%s" % (sha, name)) or "").items():
+            if name == "config.yaml" and key == "input":  # one entry per input file, so a changed file shows up on its own
+                seen = {}
+                for item in value.split(", "):
+                    base = item.rstrip("/").rpartition("/")[2] or item
+                    seen[base] = seen.get(base, 0) + 1
+                    out[(name, "input/" + base + ("" if seen[base] == 1 else "#%d" % seen[base]))] = (item, name)
+                continue
+            out[("MOM_input" if name == "MOM_override" else name, key)] = (value, name)
+    return out
+
+
+def settings_history(run_dir, ref="HEAD"):
+    """Edits to the tracked settings since payu's first run commit, from the git log of its control directory."""
+    log = git(run_dir, "log", "--first-parent", "--reverse", "--format=%H%x1f%cI%x1f%s", ref)
+    if log is None:
+        return None
+    commits = [line.split("\x1f") for line in log.splitlines() if line.count("\x1f") == 2]
+    first = next((i for i, c in enumerate(commits) if RUN_COMMIT.search(c[2])), None)
+    if first is None:
+        return {"runs": [], "changes": [], "build": {}}
+    touched = set((git(run_dir, "log", "--first-parent", "--format=%H", commits[first][0] + ".." + ref, "--",
+                       *HISTORY_FILES) or "").split())
+    # payu makes a run commit when it starts a run, so a crashed (or discarded) attempt leaves one too. An attempt is
+    # superseded when a later run commit has the same or a lower number: that run was redone. Edits are dated by the
+    # last run that finished, so an edit made between a crashed attempt and its redo is "after" the run before it.
+    numbers = [(i, int(RUN_COMMIT.search(c[2]).group(1))) for i, c in enumerate(commits) if i >= first and RUN_COMMIT.search(c[2])]
+    superseded, lowest = set(), None
+    for i, n in reversed(numbers):
+        if lowest is not None and lowest <= n:
+            superseded.add(i)
+        lowest = n if lowest is None else min(lowest, n)
+    prev, runs, changes, counter = settings_at(run_dir, commits[first][0]), [], [], None
+    for i, (sha, when, subject) in enumerate(commits[first:], first):
+        if sha in touched:  # a run commit can carry edits too (e.g. config.yaml), so diff before counting it
+            now = settings_at(run_dir, sha)
+            for key in sorted(set(prev) | set(now)):
+                (old, old_src), (new, new_src) = prev.get(key, (None, None)), now.get(key, (None, None))
+                if norm(old) != norm(new):
+                    changes.append({"when": when, "sha": sha[:8], "subject": subject, "seq": len(runs),
+                                    "counter": counter, "file": new_src or old_src, "key": key[1], "old": old, "new": new})
+            prev = now
+        m = RUN_COMMIT.search(subject)
+        if m:
+            if i not in superseded:
+                counter = int(m.group(1))
+            runs.append([when, int(m.group(1))])
+    build = {key: prev.get(("config.yaml", key), (None,))[0] for key in BUILD_KEYS}  # as of the latest commit
+    return {"runs": runs, "changes": changes, "build": build,
+            "completed": len(numbers) - len(superseded), "redone": sorted(n for i, n in numbers if i in superseded)}
+
+
 def payu_status(run_dir):
     """Output of `payu status` in the run's control directory, or None if payu isn't available or it fails
     (for instance for a run owned by another account: payu looks for the archive under this account's /scratch)."""
@@ -174,6 +324,7 @@ def main(archive, dest, run_dir=None):
                    "metadata": open(meta).read() if readable(meta) else None,
                    "truncations": truncations(outputs),
                    "run_dir": run_dir,
+                   "settings": settings_history(run_dir) if run_dir else None,
                    "payu_status": payu_status(run_dir) if run_dir else None,
                    "work_truncations": truncations([os.path.join(run_dir, "work")]) if run_dir else None, "run_logs": run_dir_logs(run_dir) if run_dir else {},
                    "configs": {p: {"text": tail(p, lines=100000, nbytes=500000), "mtime": os.path.getmtime(p)}
