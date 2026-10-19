@@ -16,7 +16,12 @@
 .chip { display: inline-block; min-width: 1.5em; text-align: center; border-radius: 4px; color: #fff; font-weight: 600; padding: 0 .35em; margin-right: .3em; }
 .chip.a { background: #2b8cbe; }
 .chip.b { background: #d95f0e; }
-#config-diff-app .hint, #config-diff-app .refs, #config-diff-app .count { font-size: .75rem; opacity: .8; }
+#config-diff-app .refs, #config-diff-app .count { font-size: .75rem; opacity: .8; }
+/* Material gives <details> and admonitions their own display, which overrides the browser's rule for the hidden attribute */
+#config-diff-app [hidden] { display: none !important; }
+#config-diff-app #hint { margin-top: 1rem; }
+/* the row a dot jumped to */
+.settings-table tr.hit > td { background: var(--md-code-bg-color); }
 table.diff { width: 100%; border-collapse: collapse; font-size: .72rem; display: table; }
 table.diff th { text-align: left; font-size: .65rem; text-transform: uppercase; opacity: .75; padding: .5rem .6rem; border-bottom: 1px solid var(--md-default-fg-color--lighter); }
 table.diff td { padding: .35rem .6rem; border-bottom: 1px solid var(--md-default-fg-color--lightest); vertical-align: top; overflow-wrap: anywhere; font-family: var(--md-code-font-family); }
@@ -54,5 +59,6 @@ table.diff td.unset { font-style: italic; opacity: .7; }
   #hist-body td[data-label^="After run"]::before { display: inline; content: "after run "; }
   #hist-body td[data-label="Commit"], #hist-body td[data-label="Changes"] { -webkit-order: 6; order: 6; width: 100% !important; font-size: .7rem; opacity: .9; }
   #hist-body td[data-label="Component"] { display: none !important; }
+  #hist-body tbody tr.hit { background: var(--md-code-bg-color); }
   #hist-body .admonition { margin-left: 0; margin-right: 0; padding-left: .4rem; padding-right: .4rem; }
 }

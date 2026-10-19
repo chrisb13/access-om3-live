@@ -26,3 +26,5 @@
 /* Settings chart: a phone layout replaces the wide one on small screens */
 .settings-chart.narrow { display: none; }
 @media (max-width: 640px) { .settings-chart.wide { display: none; } .settings-chart.narrow { display: block; } }
+/* The theme's `:target::before` (an offset for anchor links) would become an extra, empty cell in a targeted table row */
+.md-typeset tr:target::before { content: none; display: none; }

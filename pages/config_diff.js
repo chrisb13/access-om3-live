@@ -49,7 +49,7 @@
       '<div class="row2"><div class="field"><label class="l" for="mdf">Filter</label><input type="text" id="mdf" placeholder="setting, module or value"></div>' +
       '<label class="chk"><input type="checkbox" id="mdall"> Show unchanged parameters too</label><button id="mdcopy" type="button">Copy as Markdown</button></div></div>' +
       '<div class="refs" id="mdrefs"></div><div class="count" id="mdcount"></div><div id="mdtable"></div>' +
-      '<p class="hint" id="hint">Choose two experiments to compare their parameters and see their settings history.</p>' +
+      '<div class="admonition info" id="hint"><p id="hinttext"></p></div>' +
       '<details id="hist" class="note" hidden><summary>Settings changed during these runs</summary><div id="hist-body"></div></details>';
     var ea = null, eb = null, rows = [], stamp = 0;
     function visible() { var q = $("mdf").value.trim().toLowerCase();
@@ -75,7 +75,12 @@
     function update() {
       ea = idx[$("mda").value] || null; eb = idx[$("mdb").value] || null;
       history.replaceState(null, "", ea || eb ? "#a=" + (ea ? encodeURIComponent(ea.slug) : "") + "&b=" + (eb ? encodeURIComponent(eb.slug) : "") : location.pathname);
-      if (!ea || !eb) { $("mdtable").innerHTML = ""; $("mdrefs").textContent = ""; $("mdcount").textContent = ""; drawHist(); return; }
+      if (!ea || !eb) {
+        $("mdtable").innerHTML = ""; $("mdrefs").textContent = ""; $("mdcount").textContent = "";
+        $("hinttext").textContent = !ea && !eb ? "Choose two experiments to compare. You will see which MOM6 parameters differ and, below that, how each experiment's settings changed during its runs."
+          : "Now choose experiment " + (ea ? "B" : "A") + ".";
+        drawHist(); return;
+      }
       var mine = ++stamp; $("mdcount").textContent = "Loading…";
       Promise.all([get(base + ea.slug + ".json", true), get(base + eb.slug + ".json", true), get(base + ea.slug + ".html"), get(base + eb.slug + ".html")]).then(function (r) {
         if (mine !== stamp) return;  // a newer choice has been made meanwhile
@@ -93,6 +98,12 @@
       var md = ["| Module | Setting | " + ea.label + " | " + eb.label + " |", "|---|---|---|---|"].concat(visible().map(function (r) { return "| " + r.module + " | `" + r.v + "` | " + v(r.a) + " | " + v(r.b) + " |"; })).join("\n");
       copyText(md).then(function () { $("mdcopy").textContent = "Copied!"; setTimeout(function () { $("mdcopy").textContent = "Copy as Markdown"; }, 1500); });
     };
+    root.addEventListener("click", function (e) {  // a dot jumps to its row without changing the address, which holds the two choices
+      var a = e.target.closest && e.target.closest('a[href^="#A-chg-"], a[href^="#B-chg-"]'); if (!a) return;
+      var row = document.getElementById(a.getAttribute("href").slice(1)); if (!row) return;
+      e.preventDefault(); Array.prototype.forEach.call(root.querySelectorAll("tr.hit"), function (r) { r.classList.remove("hit"); }); row.classList.add("hit");
+      if (row.scrollIntoView) row.scrollIntoView({block: "center", behavior: "smooth"});
+    });
     update();
   }
   function init() {
