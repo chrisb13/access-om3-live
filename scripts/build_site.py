@@ -274,18 +274,18 @@ def _truncation_text(st: dict, work: bool = False) -> list:
     segs = [s for s in t.get("segments", []) if s["truncs"] is not None]
     if work and not segs:
         return []  # no work/ocean.stats: nothing running, or not started yet
-    md = ["### Truncation locations\n"]
+    md = ["### Truncation locations" + ("" if work else " for all completed run segments") + "\n"]
     if not segs:
         return md + ["No `ocean.stats` files found in the output folders.\n"]
     total, hit = sum(s["truncs"] for s in segs), [s for s in segs if s["truncs"]]
     if work and not total:
-        return md + ["✅ No velocity truncations so far in this run (`work/ocean.stats`).\n"]
+        return md + ["✅ No velocity truncations so far in the run segment currently underway (`work/ocean.stats`).\n"]
     if not total:
         return md + [f"✅ No velocity truncations: the Truncs column of `ocean.stats` is zero in all {len(segs)} output folders.\n"]
     runs = st.get("runs", [])
     periods = {f"output{int(r['run']):03d}": f"{_date(_start(r, runs), 7)} → {_date(r.get('model_finish'), 7)}"
                for r in runs if str(r.get("run")).isdigit() and r.get("model_finish")}
-    where = ("so far in this run (the Truncs column of `work/ocean.stats`)" if work else
+    where = ("so far in the run segment currently underway (the Truncs column of `work/ocean.stats`)" if work else
              f"in {len(hit)} of {len(segs)} output folders (the Truncs column of each `outputNNN/ocean.stats`)")
     md += [f"⚠️ MOM6 truncated velocities **{total:,}** times {where}. MOM6 truncates a velocity when its CFL number "
            "exceeds `CFL_TRUNCATE` (0.5 by default), and stops the run if more than `MAXTRUNC` truncations happen between "
@@ -309,7 +309,7 @@ def _truncation_text(st: dict, work: bool = False) -> list:
         md.append(f"\nThe other {len(segs) - len(hit)} output folders had no truncations.\n")
     no_files = [s for s in hit if not s["records"]]
     if no_files:
-        which = ("this run" if work else
+        which = ("the run segment currently underway" if work else
                  f"the only output folder with truncations ({_spans([s['output'] for s in no_files])})"
                  if len(hit) == 1 else
                  f"every output folder with truncations ({_spans([s['output'] for s in no_files])})"
