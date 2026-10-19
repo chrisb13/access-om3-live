@@ -241,16 +241,16 @@ def settings_at(run_dir, sha):
     return out
 
 
-def settings_history(run_dir):
+def settings_history(run_dir, ref="HEAD"):
     """Edits to the tracked settings since payu's first run commit, from the git log of its control directory."""
-    log = git(run_dir, "log", "--first-parent", "--reverse", "--format=%H%x1f%cI%x1f%s")
+    log = git(run_dir, "log", "--first-parent", "--reverse", "--format=%H%x1f%cI%x1f%s", ref)
     if log is None:
         return None
     commits = [line.split("\x1f") for line in log.splitlines() if line.count("\x1f") == 2]
     first = next((i for i, c in enumerate(commits) if RUN_COMMIT.search(c[2])), None)
     if first is None:
         return {"runs": [], "changes": [], "build": {}}
-    touched = set((git(run_dir, "log", "--first-parent", "--format=%H", commits[first][0] + "..HEAD", "--",
+    touched = set((git(run_dir, "log", "--first-parent", "--format=%H", commits[first][0] + ".." + ref, "--",
                        *HISTORY_FILES) or "").split())
     prev, runs, changes, counter = settings_at(run_dir, commits[first][0]), [], [], None
     for sha, when, subject in commits[first:]:
