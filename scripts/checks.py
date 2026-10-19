@@ -253,3 +253,23 @@ def friends(run_dir: str, sha: str = None) -> str:
            "git --git-dir=\"$T/configs.git\" describe --tags --abbrev=0 \"$S\"",
            "",
            "rm -rf \"$T\"   # remove the temporary copy"])
+
+
+def settings_changes_branch(branch: str) -> str:
+    """Clone an experiment's branch and list every edit to the tracked settings files since its first run commit."""
+    files = "config.yaml MOM_input MOM_override nuopc.runconfig ice_in"
+    return "\n".join(
+        _note("WHAT THIS DOES: re-checks the settings history of this experiment from its branch in access-om3-experiments, "
+              "a copy of the payu control directory kept in git. It downloads the branch, counts payu's run commits, and lists every "
+              "edit made to the settings files since the first run, oldest first. A line starting with '-' was removed and a line "
+              "starting with '+' was added. The branch may have new commits since this page was built.")
+        + ["", "# Step 1: download this experiment's branch (the history of its control directory) into a folder called exp-check",
+           f"git clone --branch {shlex.quote(branch)} --single-branch https://github.com/ACCESS-Community-Hub/access-om3-experiments exp-check",
+           "cd exp-check", "",
+           "# Step 2: payu makes one git commit for every run, with a message that ends in 'Run <number>'. This counts them.",
+           "git log --first-parent --format=%s | grep -c ': Run [0-9]*$'", "",
+           "# Step 3: find the first run commit (the history starts there)",
+           "FIRST=$(git log --first-parent --reverse --format='%H %s' | grep -m1 ': Run [0-9]*$' | cut -d' ' -f1)", "",
+           "# Step 4: every edit to the settings files after that, oldest first. Each starts with a line like",
+           "# '=== <commit> <date> <message>', followed by what changed.",
+           f"git log -p --first-parent --reverse --format='=== %h %cI %s' \"$FIRST\"..HEAD -- {files}"])
