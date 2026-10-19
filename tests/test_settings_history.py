@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "gadi"), str(ROOT / "scripts")]
+import checks  # noqa: E402
 import run_status  # noqa: E402
 
 
@@ -33,3 +34,10 @@ def test_an_edit_after_a_crashed_attempt_is_after_the_run_before_it(tmp_path):
     assert [(c["key"], c["new"], c["counter"]) for c in hist["changes"]] == [("DT", "720", 11), ("DT", "600", 12)]
     assert hist["completed"] == 3 and hist["redone"] == [12]
     assert [n for _, n in hist["runs"]] == [11, 12, 12, 13]  # every run commit is still drawn
+
+
+def test_both_settings_checks_share_their_steps():
+    run_dir, branch = checks.settings_changes("/scratch/x/run"), checks.settings_changes_branch("some-branch")
+    for text in (run_dir, branch):
+        assert "uniq -c -d" in text and checks.SETTINGS_FILES in text and "Housekeeping" in text
+    assert 'git -C "$R" log --first-parent' in run_dir and "\ngit log --first-parent" in branch

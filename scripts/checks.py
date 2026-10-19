@@ -207,7 +207,7 @@ SETTINGS_HOW_TO_READ = ("The page shows these as setting values, so edits to com
 
 
 def _settings_steps(git: str) -> list:
-    """Steps 2 to 4 of the settings check; *git* is how to call git there."""
+    """Steps 2 to 4 of both settings checks (the run directory's and the branch's); *git* is how to call git there."""
     return ["# Step 2: payu makes a git commit each time it starts a run, with a message ending in 'Run <number>'.",
             "# This counts them. A run that crashed and was redone has two, and the page counts it once.",
             f"{git} log --first-parent --format=%s | grep -c ': Run [0-9]*$'",
@@ -263,3 +263,16 @@ def friends(run_dir: str, sha: str = None) -> str:
            "git --git-dir=\"$T/configs.git\" describe --tags --abbrev=0 \"$S\"",
            "",
            "rm -rf \"$T\"   # remove the temporary copy"])
+
+
+def settings_changes_branch(branch: str) -> str:
+    """Clone an experiment's branch and list every edit to the tracked settings files since its first run commit."""
+    return "\n".join(
+        _note("WHAT THIS DOES: re-checks the settings history of this experiment from its branch in access-om3-experiments, "
+              "a copy of the payu control directory kept in git. It downloads the branch, counts payu's run commits, and lists "
+              "every edit made to the settings files since the first run, oldest first. " + SETTINGS_HOW_TO_READ
+              + " The branch may have new commits since this page was built.")
+        + ["", "# Step 1: download this experiment's branch (the history of its control directory) into a folder called exp-check",
+           f"git clone --branch {shlex.quote(branch)} --single-branch https://github.com/ACCESS-Community-Hub/access-om3-experiments exp-check",
+           "cd exp-check", ""]
+        + _settings_steps("git"))

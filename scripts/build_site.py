@@ -2,6 +2,7 @@
 import os
 import re
 import shutil
+import tempfile
 import sys
 import textwrap
 import traceback
@@ -16,9 +17,11 @@ import json
 
 from urllib.parse import quote
 
+import markdown
 import yaml
 
 import checks
+import config_diff_data
 
 ROOT = Path(__file__).resolve().parent.parent
 CONTENT, THEME, BUILD, STATUS = ROOT / "content", ROOT / "theme" / "documentation", ROOT / "build", ROOT / "status"
@@ -781,10 +784,10 @@ def _build_box(build: dict, shown: list) -> list:
     return ['!!! info "Current build"', ""] + ["    " + r for r in rows] + [""]
 
 
-def settings_section(st: dict, e: str = "") -> list:
+def settings_section(st: dict, e: str = "", fragment: bool = False) -> list:
     """'Settings changed during this run': the current build, a timeline (or run grid if many settings) covering the
     archived runs and the current one, the table of edits, and the collapsed housekeeping list."""
-    md, hist, payu = ["## Settings changed during this run\n"], st.get("settings"), st.get("runs", [])
+    md, hist, payu = ([] if fragment else ["## Settings changed during this run\n"]), st.get("settings"), st.get("runs", [])
     if not st.get("run_dir"):
         return md + ["This comes from the git history of the payu control directory, and this experiment has no `run_dir` in "
                      "`experiments.yml`. Add one to see here every edit made to the model's settings and build during the "
@@ -802,7 +805,7 @@ def settings_section(st: dict, e: str = "") -> list:
     for n, c in enumerate(shown):
         c["n"], c["link"] = n, _param_link(c, e)  # the link goes to where the setting is documented or set in access-om3-configs
     current = any(c["current"] for c in changes) or bool(payu and payu[-1].get("status") != 0)
-    md.append(f"Every edit to the model's settings and build during this experiment, from the git history of the payu control "
+    md.append(_short_intro(runs, hist) if fragment else f"Every edit to the model's settings and build during this experiment, from the git history of the payu control "
               f"directory (`{st['run_dir']}`), starting at its first run commit ({runs[0][0]:%-d %b %Y}; {_runs_done(hist, runs)} "
               "so far). It covers the **completed runs** (the archive folder above) and the **current or crashed run** (the run "
               "directory above): the dashed vertical line marks where the completed runs end. It reads `MOM_input`, "
@@ -847,6 +850,8 @@ def settings_section(st: dict, e: str = "") -> list:
         md += [f'??? note "Housekeeping: {len(hidden)} changes to {len({c["key"] for c in hidden})} settings in '
                f'{len({c["sha"] for c in hidden})} commits (job setup, paths, diagnostic output)"']
         md += ["    " + line for line in _md_table(hidden)] + [""]
+    if fragment:  # no run_dir to check: anyone can clone the branch instead
+        return md + _check("every edit listed here, from a clone of the branch", checks.settings_changes_branch(e), "with git")
     return md + _check("the build and every edit listed here", checks.settings_changes(st["run_dir"]))
 
 
@@ -931,6 +936,40 @@ def _timeline_narrow(shown: list, runs: list, restarts: list, t0: datetime, t1: 
                        'stroke-dasharray="5 3"/>'}[kind]
         parts.append(f'{icon}<text x="24" y="{yy + 4}" font-size="11" opacity=".8">{label}</text>')
     return _svg(W, ly + 62, parts, "Timeline of edits, one strip per setting", "narrow")
+
+
+def _short_intro(runs: list, hist: dict) -> str:
+    """The one-paragraph introduction for an experiment's history on the Config Diff page."""
+    return ("From the git history of this experiment's branch in access-om3-experiments, starting at its first run commit "
+            f"({runs[0][0]:%-d %b %Y}; {_runs_done(hist, runs)}). Each numbered dot is one edit: tap it to jump to its row in "
+            "the table, which gives the old and new value and the commit message.\n")
+
+
+def settings_fragment(exp: dict) -> str:
+    """HTML of one experiment's settings history for the Config Diff page: the status page's section, without its
+    heading, with a short introduction and a check that anyone can run by cloning the branch."""
+    st = {"run_dir": f"branch {exp['branch']}", "settings": exp["history"], "runs": exp["runs"]}
+    md = "\n".join(settings_section(st, exp["branch"], fragment=True))
+    return markdown.Markdown(extensions=["admonition", "pymdownx.details", "pymdownx.superfences", "pymdownx.highlight",
+                                         "tables", "md_in_html", "attr_list"]).convert(md)
+
+
+def write_config_diff_data(summary_md: str, out: Path) -> None:
+    """For the Config Diff page: index.json, and per experiment <slug>.json (its parameters) and <slug>.html (its
+    settings history). If the data can't be read, the page is left with an empty list and the site still builds."""
+    out.mkdir(parents=True, exist_ok=True)
+    index = []
+    try:
+        with tempfile.TemporaryDirectory() as work:
+            for x in config_diff_data.collect(Path(summary_md).read_text(), Path(work)):
+                (out / f"{x['slug']}.json").write_text(json.dumps(x["params"], separators=(",", ":")))
+                (out / f"{x['slug']}.html").write_text(settings_fragment(x))
+                index.append({"slug": x["slug"], "label": x["branch"], "group": x["group"], "sha": x["sha"]})
+    except Exception as err:
+        print(f"::error::the Config Diff page has no data: {err!r}")
+        traceback.print_exc()
+    (out / "index.json").write_text(json.dumps(index, indent=1))
+    print(f"Config Diff: {len(index)} experiments")
 
 
 CONFIGS_URL = "https://github.com/ACCESS-NRI/access-om3-configs"
@@ -1260,6 +1299,12 @@ def main(summary_md: str) -> None:
     shutil.copytree(THEME / "docs", docs, ignore=shutil.ignore_patterns("pages"))
     shutil.copytree(THEME / "overrides", BUILD / "overrides")
     shutil.copy2(ROOT / "pages" / "wide.css", docs / "css")
+    # Config Diff page: every Experiments-table branch's MOM_input, and its settings history, fetched by the page
+    shutil.copy2(ROOT / "pages" / "config_diff.css", docs / "css")
+    (docs / "js").mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "pages" / "config_diff.js", docs / "js")
+    shutil.copy2(ROOT / "pages" / "config-diff.md", docs)
+    write_config_diff_data(summary_md, docs / "assets" / "config_diff")
 
     # Evaluation Summary: access-om3-configs' Experiments.md, with site-relative links sent back there.
     (docs / "index.md").write_text(Path(summary_md).read_text().replace("](/", f"]({CONFIGS_SITE}"))
@@ -1315,7 +1360,7 @@ def main(summary_md: str) -> None:
     if os.environ.get("GITHUB_STEP_SUMMARY"):  # shown at the top of the workflow run's page
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write(run_summary([n for n in names if n != "archive"]))
-    nav = [{"Evaluation Summary": "index.md"}, {"OM3 Monitor": live_nav}]
+    nav = [{"Evaluation Summary": "index.md"}, {"OM3 Monitor": live_nav}, {"Config Diff": "config-diff.md"}]
     (BUILD / "mkdocs.yml").write_text(yaml.safe_dump({"INHERIT": "../mkdocs.yml", "nav": nav}, sort_keys=False))
 
 
