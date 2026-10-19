@@ -96,7 +96,7 @@
     update();
   }
   function init() {
-    var root = document.getElementById("config-diff"); if (!root || root.dataset.ready) return; root.dataset.ready = "1";
+    var root = document.getElementById("config-diff-app"); if (!root || root.dataset.ready) return; root.dataset.ready = "1";
     var base = root.dataset.base;
     get(base + "index.json", true).then(function (idx) {
       if (!idx.length) root.textContent = "No experiment data was available when this page was built."; else start(root, idx, base);

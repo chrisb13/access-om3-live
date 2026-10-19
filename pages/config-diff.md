@@ -10,4 +10,4 @@ parameters that differ (`MOM_input`, with any `MOM_override` applied) and, once 
 each experiment's settings changed during its runs. A parameter missing from one side is not set there,
 so MOM6 uses its default.
 
-<div id="config-diff" data-base="../assets/config_diff/">Loading…</div>
+<div id="config-diff-app" data-base="../assets/config_diff/">Loading…</div>
