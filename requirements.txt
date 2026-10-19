@@ -2,3 +2,6 @@ mkdocs-material==9.6.11
 mkdocs-jupyter==0.25.1
 PyYAML>=6.0
 matplotlib>=3.7
+# figure explorer: mkfigs (from access-om3-paper-1, at the commit it pins) also needs these
+numpy>=1.26
+requests>=2.31
