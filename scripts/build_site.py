@@ -168,6 +168,106 @@ def failure_page(e: str, nb: str, error: str, ran: str, partial_md: str, has_not
     return "\n".join(md)
 
 
+TIPS = "https://access-om3-configs.access-hive.org.au/latest/Tips-and-tricks/#mom6-velocity-truncations"
+RECIPE = "https://github.com/ACCESS-NRI/access-eval-recipes/blob/main/ocean/Examine_truncation_data.ipynb"
+
+
+# A pin at the point, zoomed out to regional scale (zoom 5, as in a typical "@lat,lon,5z" Google Maps link)
+MAPS = "https://www.google.com/maps/place/{lat:.2f},{lon:.2f}/@{lat:.2f},{lon:.2f},5z"
+
+
+def _place(lon: float, lat: float) -> str:
+    """'73.3°E, 67.9°N' linked to Google Maps."""
+    lon = (lon + 180) % 360 - 180
+    return f"[{abs(lon):.1f}°{'E' if lon >= 0 else 'W'}, {abs(lat):.1f}°{'N' if lat >= 0 else 'S'}]({MAPS.format(lat=lat, lon=lon)})"
+
+
+def _spans(names: list) -> str:
+    """['output001', 'output002', 'output005'] -> '001–002, 005'."""
+    if not all(n[-3:].isdigit() for n in names):
+        return ", ".join(names)  # e.g. 'work'
+    nums, out = sorted(int(n[-3:]) for n in names), []
+    for n in nums:
+        if out and n == out[-1][1] + 1:
+            out[-1][1] = n
+        else:
+            out.append([n, n])
+    return ", ".join(f"{a:03d}" + (f"–{b:03d}" if b > a else "") for a, b in out)
+
+
+def _truncation_text(st: dict, work: bool = False) -> list:
+    """Markdown for 'Truncation locations': MOM6 velocity truncations and where they happen, either per
+    archived output folder, or (work=True) for the run directory's work/ folder: the current or crashed run."""
+    t = st.get("work_truncations" if work else "truncations") or {}
+    segs = [s for s in t.get("segments", []) if s["truncs"] is not None]
+    if work and not segs:
+        return []  # no work/ocean.stats: nothing running, or not started yet
+    md = ["### Truncation locations" + ("" if work else " for all completed run segments") + "\n"]
+    if not segs:
+        return md + ["No `ocean.stats` files found in the output folders.\n"]
+    total, hit = sum(s["truncs"] for s in segs), [s for s in segs if s["truncs"]]
+    if work and not total:
+        return md + ["✅ No velocity truncations so far in the run segment currently underway (`work/ocean.stats`).\n"]
+    if not total:
+        return md + [f"✅ No velocity truncations: the Truncs column of `ocean.stats` is zero in all {len(segs)} output folders.\n"]
+    runs = st.get("runs", [])
+    periods = {f"output{int(r['run']):03d}": f"{_date(_start(r, runs), 7)} → {_date(r.get('model_finish'), 7)}"
+               for r in runs if str(r.get("run")).isdigit() and r.get("model_finish")}
+    where = ("so far in the run segment currently underway (the Truncs column of `work/ocean.stats`)" if work else
+             f"in {len(hit)} of {len(segs)} output folders (the Truncs column of each `outputNNN/ocean.stats`)")
+    md += [f"⚠️ MOM6 truncated velocities **{total:,}** times {where}. MOM6 truncates a velocity when its CFL number "
+           "exceeds `CFL_TRUNCATE` (0.5 by default), and stops the run if more than `MAXTRUNC` truncations happen between "
+           "energy saves (MOM6's default is 0, so any truncation stops it; the ACCESS-OM3 configurations set 10,000). "
+           f"See [MOM6 velocity truncations]({TIPS}) for how to read the records, and "
+           f"[Examine_truncation_data.ipynb]({RECIPE}) for mapping them.\n"]
+    if not work:  # one row per output folder that had truncations
+        md += ["*Location records* are the detailed records MOM6 also writes, one per truncation, to "
+               "`U_velocity_truncations` (zonal velocity) and `V_velocity_truncations` (meridional velocity); the "
+               "location table below is built from them. MOM6 writes at most 50 per PE per run, so there are usually "
+               "fewer of them than truncations; – means no file of that kind.\n",
+               "| Output folder | Model period | Truncations | Max CFL | Location records (U / V) | PEs at the record cap |",
+               "|---|---|---:|---:|---|---|"]
+    for s in ([] if work else hit):
+        rec = " / ".join(str(s["records"].get(uv, "–")) for uv in "UV") if s["records"] else "–"
+        if s["truncs"] and not s["records"]:
+            rec = "⚠️ files unreadable" if s.get("unreadable") else "⚠️ no files"
+        md.append(f"| {s['output']} | {periods.get(s['output'], '')} | {s['truncs']:,} | "
+                  f"{'–' if s['max_cfl'] is None else format(s['max_cfl'], '.2f')} | {rec} | {', '.join(map(str, sorted(set(s['capped_pes'])))) or '–'} |")
+    if not work and len(hit) < len(segs):
+        md.append(f"\nThe other {len(segs) - len(hit)} output folders had no truncations.\n")
+    no_files = [s for s in hit if not s["records"]]
+    if no_files:
+        which = ("the run segment currently underway" if work else
+                 f"the only output folder with truncations ({_spans([s['output'] for s in no_files])})"
+                 if len(hit) == 1 else
+                 f"every output folder with truncations ({_spans([s['output'] for s in no_files])})"
+                 if len(no_files) == len(hit) else
+                 f"{len(no_files)} of the {len(hit)} output folders with truncations "
+                 f"({_spans([s['output'] for s in no_files])})")
+        md += ["", f"⚠️ `ocean.stats` reports truncations in {which}, but there are no readable "
+               "`U_velocity_truncations` / `V_velocity_truncations` files there, so where those truncations happened "
+               "can't be shown. MOM6 only writes these files when `U_TRUNC_FILE` and `V_TRUNC_FILE` are set in "
+               "`MOM_input` (both default to empty); otherwise they may not have been copied to the archive, or "
+               "they belong to someone else and can't be read.\n"]
+    if not t.get("boxes"):
+        return md
+    md += ["", "**Where MOM6 truncates** (1° boxes, most records first; from the `U_velocity_truncations` and "
+           "`V_velocity_truncations` files):\n",
+           "| Location | Records | Grid cells | Seen in output | Velocity | Layers | Max speed (m/s) | Max CFL "
+           "| Surface height (m) | Depth (m) |", "|---|---:|---:|---|---|---|---:|---:|---:|---:|"]
+    for b in t.get("boxes", []):
+        md.append(f"| {_place(b['lon'], b['lat'])} | {b['records']}{'*' if b['capped'] else ''} | {b['cells']} | "
+                  f"{_spans(b['outputs'])} | {', '.join(b['uv'])} | {b['layers'][0]}–{b['layers'][1]} | "
+                  f"{b['max_vel']:.1f} | {b['max_cfl']:.2f} | "
+                  f"{'' if b['top_e'] is None else format(b['top_e'], '.2f')} | "
+                  f"{'' if b['depth'] is None else format(b['depth'], '.0f')} |")
+    md += ["", "\\* MOM6 writes at most 50 records per PE per run (`MAX_TRUNC_FILE_SIZE_PER_PE`), and this box's PE hit "
+           "that cap in at least one run, so it truncated more often than the record count shows. Surface height is "
+           "the top-interface height `e`, shown only for records that include layer 1; depth is the shallower of the "
+           "two cells (`D`).\n"]
+    return md
+
+
 def _issue_link(url: str) -> str:
     """'[owner/repo#123](url)' for a GitHub issue or pull request, else the link itself."""
     m = re.match(r"https://github\.com/([^/]+/[^/]+)/(?:issues|pull)/(\d+)", url or "")
@@ -204,6 +304,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
             md.append(f"**Latest model date in `work/log/med.log`:** {dates[-1].split('Model Date:')[1].split()[0]}"
                       f" (rate {dates[-1].split('rate =')[-1].strip()})\n")
         md += ["### Log files\n"] + (_logs(st["run_logs"]) or ["No logs found there.\n"])
+        md += _truncation_text(st, work=True)
         if st.get("configs"):
             md.append("### Configuration files\n")
             for path, cfg in st["configs"].items():
@@ -230,6 +331,7 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
         md += ["### Latest logs in the archive folder\n"] + _logs(st["logs"])
     if st.get("metadata"):
         md += _block(f"{archive}/metadata.yaml", st["metadata"], kind="info", lang="yaml")
+    md += _truncation_text(st)
     return "\n".join(md)
 
 
