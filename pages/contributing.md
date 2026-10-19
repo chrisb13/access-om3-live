@@ -16,6 +16,11 @@ Everything that builds this site is in [{repo}](https://github.com/{repo}). The 
 
 - **Monitor an experiment:** add its archive folder to `experiments.yml` and open a pull request; see
   [Monitoring a new experiment](live/index.md#monitoring-a-new-experiment).
+- **Compare an experiment in Config Diff:** an experiment appears on [Config Diff](config-diff.md) when
+  it is listed in the [Experiments](https://access-om3-configs.access-hive.org.au/latest/Experiments/)
+  table of access-om3-configs and its branch in
+  [access-om3-experiments](https://github.com/ACCESS-Community-Hub/access-om3-experiments) has a
+  `MOM_input`; it shows up the next time this site is rebuilt.
 - **Change a notebook or add a figure:** the notebooks come from
   [access-om3-paper-1](https://github.com/ACCESS-Community-Hub/access-om3-paper-1). Changes go there as
   a pull request; once merged, the commit in `paper_ref` in `experiments.yml` is updated to use them.
