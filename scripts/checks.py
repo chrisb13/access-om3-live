@@ -200,34 +200,42 @@ def throughput(archive: str) -> str:
            "done"])
 
 
+SETTINGS_FILES = "config.yaml MOM_input MOM_override nuopc.runconfig ice_in"
+SETTINGS_HOW_TO_READ = ("The page shows these as setting values, so edits to comments or formatting do not appear there, and paths, "
+                        "layout, output and job settings are under its Housekeeping note. In the list of edits, a line starting "
+                        "with '-' was removed and a line starting with '+' was added.")
+
+
+def _settings_steps(git: str) -> list:
+    """Steps 2 to 4 of both settings checks (the run directory's and the branch's); *git* is how to call git there."""
+    return ["# Step 2: payu makes a git commit each time it starts a run, with a message ending in 'Run <number>'.",
+            "# This counts them. A run that crashed and was redone has two, and the page counts it once.",
+            f"{git} log --first-parent --format=%s | grep -c ': Run [0-9]*$'",
+            "# These are the redone runs: how many run commits each has, then the run (prints nothing if none).",
+            f"{git} log --first-parent --format=%s | grep -o 'Run [0-9]*$' | sort | uniq -c -d",
+            "",
+            "# Step 3: find the first run commit (the history starts there)",
+            f"FIRST=$({git} log --first-parent --reverse --format='%H %s' | grep -m1 ': Run [0-9]*$' | cut -d' ' -f1)",
+            "",
+            "# Step 4: every edit to the settings files after that, oldest first. Each edit starts with a line like",
+            "# '=== <commit> <date> <message>', followed by what changed.",
+            f"{git} log -p --first-parent --reverse --format='=== %h %cI %s' \"$FIRST\"..HEAD -- {SETTINGS_FILES}"]
+
+
 def settings_changes(run_dir: str) -> str:
     """The current build, the run count, and every edit to the tracked settings files since the first run commit."""
-    files = "config.yaml MOM_input MOM_override nuopc.runconfig ice_in"
     return "\n".join(
         _note("WHAT THIS DOES: checks the 'Settings changed during this run' section. It prints the current build from "
               "config.yaml, counts payu's run commits, and lists every edit made to the settings files since the first run, "
-              "using git (the history of changes kept in the control directory). The page shows these as setting values, so "
-              "edits to comments or formatting do not appear there, and paths, layout, output and job settings are under its "
-              "Housekeeping note. In the list of edits, a line starting with "
-              "'-' was removed and a line starting with '+' was added.")
+              "using git (the history of changes kept in the control directory). " + SETTINGS_HOW_TO_READ)
         + _vars(run_dir=run_dir)
         + ["", "# Step 1: the current build: the 'model' and 'exe' lines of config.yaml, and its 'modules:' block",
            "# (sed prints the lines from 'modules:' down to the next empty line)",
            "grep -E '^(model|exe):' \"$R/config.yaml\"",
            "sed -n '/^modules:/,/^$/p' \"$R/config.yaml\"",
-           "",
-           "# Step 2: payu makes one git commit for every run, with a message that ends in 'Run <number>'.",
-           "# This counts them: it is the number of completed runs on the page.",
-           "git -C \"$R\" log --first-parent --format=%s | grep -c ': Run [0-9]*$'",
-           "",
-           "# Step 3: find the first run commit (the chart starts there)",
-           "FIRST=$(git -C \"$R\" log --first-parent --reverse --format='%H %s' | grep -m1 ': Run [0-9]*$' | cut -d' ' -f1)",
-           "",
-           "# Step 4: every edit to the settings files after that, oldest first. Each edit starts with a line like",
-           "# '=== <commit> <date> <message>', followed by what changed.",
-           f"git -C \"$R\" log -p --first-parent --reverse --format='=== %h %cI %s' \"$FIRST\"..HEAD -- {files}",
-           "",
-           "# If git says 'dubious ownership', the folder belongs to someone else: add  -c safe.directory=\"$R\"  after the word git."])
+           ""]
+        + _settings_steps('git -C "$R"')
+        + ["", "# If git says 'dubious ownership', the folder belongs to someone else: add  -c safe.directory=\"$R\"  after the word git."])
 
 
 def friends(run_dir: str, sha: str = None) -> str:
@@ -259,21 +267,12 @@ def friends(run_dir: str, sha: str = None) -> str:
 
 def settings_changes_branch(branch: str) -> str:
     """Clone an experiment's branch and list every edit to the tracked settings files since its first run commit."""
-    files = "config.yaml MOM_input MOM_override nuopc.runconfig ice_in"
     return "\n".join(
         _note("WHAT THIS DOES: re-checks the settings history of this experiment from its branch in access-om3-experiments, "
-              "a copy of the payu control directory kept in git. It downloads the branch, counts payu's run commits, and lists every "
-              "edit made to the settings files since the first run, oldest first. The page shows these as setting values, so edits to "
-              "comments or formatting do not appear there, and paths, layout, output and job settings are under its Housekeeping "
-              "note. A line starting with '-' was removed and a line "
-              "starting with '+' was added. The branch may have new commits since this page was built.")
+              "a copy of the payu control directory kept in git. It downloads the branch, counts payu's run commits, and lists "
+              "every edit made to the settings files since the first run, oldest first. " + SETTINGS_HOW_TO_READ
+              + " The branch may have new commits since this page was built.")
         + ["", "# Step 1: download this experiment's branch (the history of its control directory) into a folder called exp-check",
            f"git clone --branch {shlex.quote(branch)} --single-branch https://github.com/ACCESS-Community-Hub/access-om3-experiments exp-check",
-           "cd exp-check", "",
-           "# Step 2: payu makes one git commit for every run, with a message that ends in 'Run <number>'. This counts them.",
-           "git log --first-parent --format=%s | grep -c ': Run [0-9]*$'", "",
-           "# Step 3: find the first run commit (the history starts there)",
-           "FIRST=$(git log --first-parent --reverse --format='%H %s' | grep -m1 ': Run [0-9]*$' | cut -d' ' -f1)", "",
-           "# Step 4: every edit to the settings files after that, oldest first. Each starts with a line like",
-           "# '=== <commit> <date> <message>', followed by what changed.",
-           f"git log -p --first-parent --reverse --format='=== %h %cI %s' \"$FIRST\"..HEAD -- {files}"])
+           "cd exp-check", ""]
+        + _settings_steps("git"))
