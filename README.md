@@ -48,3 +48,15 @@ python3 -m http.server -d build/site     # then open http://localhost:8000/
 Repository secrets: `GADI_USER`, `GADI_KEY` (and `GADI_KEY_PASSPHRASE` if the key has one),
 `GADI_WORK_DIR` (a folder on Gadi the service user can write to).
 Settings → Pages → Source: **GitHub Actions**.
+
+## Figure explorer
+
+`pages/figure-explorer.md` overlays the line-plot figures of every run on the
+[Experiments page](https://access-om3-configs.access-hive.org.au/latest/Experiments/).
+At build time `scripts/figure_explorer_data.py` reads that page with mkfigs' own
+parser (fetched at the commit access-om3-paper-1 pins), takes each run's data
+bundle from paper-1's `documentation/figure-data.json` index, downloads it from
+Figshare, checks its sha256, and writes the page's data under
+`assets/figure_explorer/`. Bundles are cached in `.cache/figure-data`; a run whose
+download fails keeps its last good copy. Tests:
+`PYTHONPATH=theme/external/access-model-mkfigs/src python -m pytest tests`.

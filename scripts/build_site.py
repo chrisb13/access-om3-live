@@ -22,6 +22,7 @@ import yaml
 
 import checks
 import config_diff_data
+import figure_explorer_data
 
 ROOT = Path(__file__).resolve().parent.parent
 CONTENT, THEME, BUILD, STATUS = ROOT / "content", ROOT / "theme" / "documentation", ROOT / "build", ROOT / "status"
@@ -1310,6 +1311,16 @@ def main(summary_md: str) -> None:
     shutil.copy2(ROOT / "pages" / "config_diff.js", docs / "js")
     shutil.copy2(ROOT / "pages" / "config-diff.md", docs)
     write_config_diff_data(summary_md, docs / "assets" / "config_diff")
+    # Figure explorer: line-plot data for every Experiments-table run, from access-om3-paper-1's index
+    shutil.copy2(ROOT / "pages" / "figure_explorer.css", docs / "css")
+    shutil.copy2(ROOT / "pages" / "figure_explorer.js", docs / "js")
+    shutil.copy2(ROOT / "pages" / "figure-explorer.md", docs)
+    try:  # the explorer must never stop the rest of the site building
+        for line in figure_explorer_data.build(Path(summary_md).read_text(), THEME.parent,
+                                               docs / "assets" / "figure_explorer", ROOT / ".cache" / "figure-data"):
+            print("[figure-explorer]", line)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[figure-explorer] WARNING: page data not built: {exc}")
 
     contributing = (ROOT / "pages" / "contributing.md").read_text()
     (docs / "contributing.md").write_text(contributing.replace("{repo}", REPO).replace("{issue_url}", ISSUE_URL))
@@ -1379,7 +1390,7 @@ def main(summary_md: str) -> None:
     if os.environ.get("GITHUB_STEP_SUMMARY"):  # shown at the top of the workflow run's page
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write(run_summary([n for n in names if n != "archive"]))
-    nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Config Diff": "config-diff.md"}, {"Evaluation Summary": "evaluation-summary.md"},
+    nav = [{"Home": "index.md"}, {"OM3 Monitor": live_nav}, {"Config Diff": "config-diff.md"}, {"Figure explorer": "figure-explorer.md"}, {"Evaluation Summary": "evaluation-summary.md"},
            {"Contributing and feedback": "contributing.md"}]
     (BUILD / "mkdocs.yml").write_text(yaml.safe_dump({"INHERIT": "../mkdocs.yml", "nav": nav, "hooks": ["../scripts/edit_links.py"]}, sort_keys=False))
 

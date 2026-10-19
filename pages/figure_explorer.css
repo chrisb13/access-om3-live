@@ -1,0 +1,67 @@
+/* Figure explorer page (pages/figure-explorer.md). Colours come from the Material theme. */
+.fx { display: grid; grid-template-columns: minmax(230px, 290px) minmax(0, 1fr); gap: 0 1.6rem; align-items: start; }
+.fx-rail { position: sticky; top: 3.6rem; max-height: calc(100vh - 4.5rem); overflow: auto; padding-right: .3rem; }
+.fx-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.fx-q { width: 100%; font: inherit; font-size: .8rem; padding: .45rem .6rem; color: var(--md-default-fg-color); background: var(--md-default-bg-color); border: 1px solid var(--md-default-fg-color--lighter); border-radius: 4px; }
+.fx-count { font-size: .64rem; color: var(--md-default-fg-color--light); margin: .35rem 0 .5rem; }
+.fx-cat { border-top: 1px solid var(--md-default-fg-color--lightest); }
+.fx-cat-h, .fx-fig { all: unset; box-sizing: border-box; cursor: pointer; width: 100%; }
+.fx-cat-h { display: flex; align-items: center; gap: .35rem; padding: .45rem .1rem; font-weight: 700; font-size: .7rem; }
+.fx-caret { display: inline-block; width: .8em; color: var(--md-default-fg-color--light); transition: transform .12s; }
+.fx-cat[data-open="1"] .fx-caret { transform: rotate(90deg); }
+.fx-cat-b { display: none; padding-bottom: .4rem; }
+.fx-cat[data-open="1"] .fx-cat-b { display: block; }
+.fx-n { margin-left: auto; font-weight: 400; font-size: .62rem; color: var(--md-default-fg-color--light); font-variant-numeric: tabular-nums; }
+.fx-nb-h { display: flex; align-items: baseline; gap: .3rem; padding: .15rem .2rem 0 .5rem; font-size: .66rem; font-weight: 700; }
+.fx-nb-h a { color: inherit; overflow-wrap: anywhere; }
+.fx-nb-i { font-size: .58rem; color: var(--md-default-fg-color--light); padding: 0 .2rem .2rem .5rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fx-nb-i a { color: inherit; }
+.fx-rail ul { list-style: none; margin: 0 !important; padding: 0; }
+.fx-rail li { margin: 0 !important; }
+.fx-fig { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: .4rem; padding: .22rem .4rem .22rem .55rem; border-left: 3px solid transparent; font-size: .66rem; }
+.fx-fig:hover, .fx-fig[aria-current="true"] { background: var(--md-default-fg-color--lightest); }
+.fx-fig[aria-current="true"] { border-left-color: var(--md-accent-fg-color); }
+.fx-fig:focus-visible, .fx-cat-h:focus-visible { outline: 2px solid var(--md-accent-fg-color); outline-offset: -2px; }
+.fx-fl { overflow-wrap: anywhere; }
+.fx-fs { grid-column: 1; font-size: .58rem; color: var(--md-default-fg-color--light); }
+.fx-rail mark { background: var(--md-typeset-mark-color); color: inherit; }
+.fx-crumbs { font-size: .64rem; color: var(--md-default-fg-color--light); }
+.fx-crumbs a { color: inherit; }
+.md-typeset h2.fx-title { margin: .1rem 0 .1rem; }
+.fx-sub { color: var(--md-default-fg-color--light); margin: 0 0 .6rem !important; font-size: .7rem; }
+.fx-runs { border-top: 1px solid var(--md-default-fg-color--lightest); border-bottom: 1px solid var(--md-default-fg-color--lightest); padding: .4rem 0; margin-bottom: .5rem; }
+.fx-grp { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: .25rem .6rem; padding: .15rem 0; }
+.fx-grp-h { font-size: .62rem; color: var(--md-default-fg-color--light); padding-top: .2rem; }
+.fx-chips, .fx-series { display: flex; flex-wrap: wrap; gap: .3rem; }
+.fx-chip { display: inline-flex; align-items: center; gap: .3rem; padding: .12rem .45rem .12rem .35rem; border: 1px solid var(--md-default-fg-color--lighter); border-radius: 999px; font-size: .62rem; cursor: pointer; max-width: 100%; }
+.fx-chip input { margin: 0; }
+.fx-chip .fx-sw { width: .7rem; height: 3px; border-radius: 2px; }
+.fx-chip.on { border-color: var(--fx-chip); }
+.fx-chip.on .fx-sw { background: var(--fx-chip); }
+.fx-chip.na { opacity: .45; border-style: dashed; }
+.fx-nm { overflow-wrap: anywhere; }
+.fx-badge { font-size: .55rem; font-weight: 700; padding: 0 .3rem; border-radius: 3px; background: var(--md-default-fg-color--lightest); }
+.fx-badge.warn, .fx-warn { color: var(--md-typeset-color); text-decoration: underline dotted; }
+.fx-controls { display: flex; flex-wrap: wrap; gap: .45rem 1rem; align-items: center; font-size: .66rem; margin: .2rem 0 .5rem; }
+.fx-seg { display: inline-flex; border: 1px solid var(--md-default-fg-color--lighter); border-radius: 4px; overflow: hidden; }
+.fx-seg label { padding: .18rem .5rem; cursor: pointer; }
+.fx-seg label + label { border-left: 1px solid var(--md-default-fg-color--lighter); }
+.fx-seg input { position: absolute; opacity: 0; pointer-events: none; }
+.fx-seg label:has(input:checked) { background: var(--md-default-fg-color--lightest); font-weight: 700; }
+.fx-seg[aria-disabled="true"], .fx-ctl[aria-disabled="true"] { opacity: .45; }
+.fx-ctl { display: inline-flex; align-items: center; gap: .3rem; cursor: pointer; }
+.fx-btn { font: inherit; padding: .18rem .6rem; border: 1px solid var(--md-default-fg-color--lighter); border-radius: 4px; background: none; color: inherit; cursor: pointer; }
+.fx-why { color: var(--md-default-fg-color--light); }
+.fx-plots { display: grid; grid-template-columns: repeat(var(--fx-cols, 1), minmax(0, 1fr)); gap: .3rem 1rem; }
+.md-typeset .fx-plots h3 { font-size: .68rem; margin: .3rem 0 0; }
+.fx-pane { height: var(--fx-h, 420px); }
+.fx-empty { padding: 2rem 1rem; text-align: center; color: var(--md-default-fg-color--light); border: 1px dashed var(--md-default-fg-color--lighter); border-radius: 6px; }
+.fx-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .64rem; margin: .4rem 0 .8rem; }
+.fx-it { display: inline-flex; align-items: center; gap: .35rem; }
+.fx-k { color: var(--md-default-fg-color--light); }
+.fx-details { font-size: .66rem; }
+.fx-scroll { overflow-x: auto; }
+.md-typeset .fx-details table { font-size: .6rem; }
+.md-typeset .fx-notes h3 { font-size: .75rem; margin-top: .8rem; }
+.fx-notes { font-size: .7rem; }
+@media (max-width: 76.1875em) { .fx { grid-template-columns: minmax(0, 1fr); } .fx-rail { position: static; max-height: 45vh; margin-bottom: .8rem; } .fx-grp { grid-template-columns: minmax(0, 1fr); } }
