@@ -23,14 +23,7 @@ jobs:
       - name: Build the site without notebook output
         env:
           SITE_URL: http://localhost:8000/
-        run: |
-          set -euo pipefail
-          curl -fsSL -o Experiments.md https://raw.githubusercontent.com/ACCESS-NRI/access-om3-configs/main/documentation/docs/pages/Experiments.md
-          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ACCESS-Community-Hub/access-om3-paper-1.git theme
-          git -C theme sparse-checkout set documentation/overrides documentation/docs/assets documentation/docs/css documentation/docs/fontello
-          mkdir -p content status
-          python3 scripts/build_site.py Experiments.md
-          mkdocs build -f build/mkdocs.yml -d site
+        run: bash scripts/build_preview.sh
 
       - uses: actions/upload-artifact@v7
         with:
