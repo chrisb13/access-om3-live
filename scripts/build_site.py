@@ -347,13 +347,19 @@ from run_status import BUILD_KEYS  # noqa: E402  the config.yaml entries that sa
 
 GROUPS = {  # group: (title, files, colour)
     "Build": ("Build (model version)", "config.yaml", "#8e6bbf"),
+    "Run length": ("Run length", "nuopc.runconfig: stop_n, restart_n", "#a87a12"),
     "Inputs": ("Input files", "config.yaml: input", "#c2689b"),
     "Ocean": ("Ocean (MOM6)", "MOM_input, MOM_override", "#3b82c4"),
     "Coupler": ("Coupler (CMEPS)", "nuopc.runconfig", "#e0701a"),
     "Sea ice": ("Sea ice (CICE)", "ice_in", "#2a9d8f"),
 }
+RUN_LENGTH = {"stop_n", "stop_option", "restart_n", "restart_option"}  # nuopc.runconfig: model time per run, restart interval
+
+
 def _group_of(c: dict) -> str:
-    """The part of the model an edit belongs to; config.yaml's input files are their own group."""
+    """The part of the model an edit belongs to; config.yaml's input files and the run length are their own groups."""
+    if c["file"] == "nuopc.runconfig" and c["key"].rsplit(".", 1)[-1] in RUN_LENGTH:
+        return "Run length"
     return "Inputs" if c["file"] == "config.yaml" and c["key"].startswith("input/") else GROUP_OF[c["file"]]
 
 
@@ -375,6 +381,8 @@ def _local(ts: str) -> datetime:
 
 def _housekeeping(c: dict) -> bool:
     """True for edits that are not model settings: job setup, paths, layout, diagnostic output."""
+    if _group_of(c) == "Run length":  # sets how model years map onto runs, so it is charted
+        return False
     if c["file"] == "config.yaml":
         return c["key"] not in BUILD_KEYS and not c["key"].startswith("input/")
     pattern = HOUSEKEEPING.get("MOM_input" if c["file"] == "MOM_override" else c["file"])
@@ -796,7 +804,8 @@ def settings_section(st: dict, e: str = "", fragment: bool = False) -> list:
               "so far). It covers the **completed runs** (the archive folder above) and the **current or crashed run** (the run "
               "directory above): the dashed vertical line marks where the completed runs end. It reads `MOM_input`, "
               "`MOM_override`, `nuopc.runconfig`, `ice_in` and, from `config.yaml`, the model build (`model`, `exe`, `modules`) "
-              "and the input files (`input`). Each numbered dot is one edit: hover it to see the change, or use the table below, "
+              "and the input files (`input`), plus the run length (`stop_n` and `restart_n` in `nuopc.runconfig`: the model time each run "
+              "covers and how often it writes restarts). Each numbered dot is one edit: hover it to see the change, or use the table below, "
               "which gives the old and new value and the commit message. The column on the right of the chart gives each "
               "setting's value at the first run and now, and a setting's name links to where it is documented or set in "
               "access-om3-configs.\n")

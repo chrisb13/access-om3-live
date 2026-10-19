@@ -206,7 +206,9 @@ def settings_changes(run_dir: str) -> str:
     return "\n".join(
         _note("WHAT THIS DOES: checks the 'Settings changed during this run' section. It prints the current build from "
               "config.yaml, counts payu's run commits, and lists every edit made to the settings files since the first run, "
-              "using git (the history of changes kept in the control directory). In the list of edits, a line starting with "
+              "using git (the history of changes kept in the control directory). The page shows these as setting values, so "
+              "edits to comments or formatting do not appear there, and paths, layout, output and job settings are under its "
+              "Housekeeping note. In the list of edits, a line starting with "
               "'-' was removed and a line starting with '+' was added.")
         + _vars(run_dir=run_dir)
         + ["", "# Step 1: the current build: the 'model' and 'exe' lines of config.yaml, and its 'modules:' block",
@@ -261,7 +263,9 @@ def settings_changes_branch(branch: str) -> str:
     return "\n".join(
         _note("WHAT THIS DOES: re-checks the settings history of this experiment from its branch in access-om3-experiments, "
               "a copy of the payu control directory kept in git. It downloads the branch, counts payu's run commits, and lists every "
-              "edit made to the settings files since the first run, oldest first. A line starting with '-' was removed and a line "
+              "edit made to the settings files since the first run, oldest first. The page shows these as setting values, so edits to "
+              "comments or formatting do not appear there, and paths, layout, output and job settings are under its Housekeeping "
+              "note. A line starting with '-' was removed and a line "
               "starting with '+' was added. The branch may have new commits since this page was built.")
         + ["", "# Step 1: download this experiment's branch (the history of its control directory) into a folder called exp-check",
            f"git clone --branch {shlex.quote(branch)} --single-branch https://github.com/ACCESS-Community-Hub/access-om3-experiments exp-check",
