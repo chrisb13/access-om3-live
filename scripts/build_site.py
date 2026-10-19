@@ -592,9 +592,10 @@ def _svg(width: int, height: int, parts: list, label: str, cls: str = "wide") ->
 
 
 def _timeline(shown: list, runs: list, restarts: list, t0: datetime, t1: datetime, boundary: datetime,
-              current: bool, years: list) -> str:
+              current: bool, years: list, width: int = 920, cls: str = "wide has-x") -> str:
     """One row per changed setting: numbered dots at each edit, a bar while it differed from its value at the first run."""
-    W, X0, X1, XN = 920, 245, 640, 655
+    W, X0 = width, 245  # the plot gets whatever width is left between the names and the 'first run → now' column
+    X1, XN = W - 280, W - 265
     span = (t1 - t0).total_seconds()
     x = lambda t: X0 + (t - t0).total_seconds() / span * (X1 - X0)
     norm = lambda v: None if v is None else v.strip().strip("\"'").lower()  # light formatting-only differences
@@ -700,14 +701,15 @@ def _timeline(shown: list, runs: list, restarts: list, t0: datetime, t1: datetim
                         f'{escape(x_)}</text>' for i, x_ in enumerate(lines))
         parts.append(f'<g class="tip t{n}"><rect x="{tx:.1f}" y="{ty:.1f}" width="{w:.1f}" height="{h}" rx="6" '
                      f'style="fill:var(--md-default-bg-color);stroke:var(--md-default-fg-color--light)" stroke-width="1.2"/>{body}</g>')
-    return _svg(W, ly + 26 * len(items) + 6, parts, "Timeline of edits to the model build, input files and settings, one row per setting", "wide")
+    return _svg(W, ly + 26 * len(items) + 6, parts, "Timeline of edits to the model build, input files and settings, one row per setting", cls)
 
 
-def _grid(shown: list, runs: list, restarts: list, current: bool, years: list) -> str:
+def _grid(shown: list, runs: list, restarts: list, current: bool, years: list, width: int = 920, cls: str = "wide has-x") -> str:
     """One square per run and component, darker with more edits just before that run; a last column is the current run."""
     n, X0 = len(runs), 245
     cols = n + (1 if current else 0)
-    pitch = min(10.0, 640 / cols)
+    plot = width - 280
+    pitch = min(10.0 * plot / 640, plot / cols)
     parts = ['<text x="0" y="14" font-size="12.5" opacity=".7">Run counter</text>']
     for i, (_, counter) in enumerate(runs):
         if i == 0 or i in restarts:
@@ -743,7 +745,7 @@ def _grid(shown: list, runs: list, restarts: list, current: bool, years: list) -
         bx = X0 + n * pitch - .5
         parts.append(f'<line x1="{bx:.1f}" y1="36" x2="{bx:.1f}" y2="{44 + 30 * len(GROUPS)}" stroke="currentColor" opacity=".8" '
                      'stroke-width="1.5" stroke-dasharray="7 4"/>')
-    return _svg(920, 56 + 30 * len(GROUPS), parts, "Grid of runs, shaded where the build or settings were edited just before the run", "wide")
+    return _svg(width, 56 + 30 * len(GROUPS), parts, "Grid of runs, shaded where the build or settings were edited just before the run", cls)
 
 
 def _build_box(build: dict, shown: list) -> list:
@@ -819,9 +821,11 @@ def settings_section(st: dict, e: str = "", fragment: bool = False) -> list:
         t0, t1 = runs[0][0] - timedelta(seconds=pad), end + timedelta(seconds=pad)
         if len(settings) <= TIMELINE_MAX_SETTINGS:
             md.append(_timeline(shown, runs, restarts, t0, t1, boundary, current, years)
+                      + _timeline(shown, runs, restarts, t0, t1, boundary, current, years, 1600, "xwide")
                       + _timeline_narrow(shown, runs, restarts, t0, t1, boundary, current, years) + "\n")
         else:
-            md += [_grid(shown, runs, idx, current, years) + _timeline_narrow(shown, runs, restarts, t0, t1, boundary, current, years)
+            md += [_grid(shown, runs, idx, current, years) + _grid(shown, runs, idx, current, years, 1600, "xwide")
+                   + _timeline_narrow(shown, runs, restarts, t0, t1, boundary, current, years)
                    + "\n", "Each square is one completed run, oldest on the left; a coloured "
                    "square means settings were edited just before it, and darker means more edits."
                    + (" The dashed line is the end of the completed runs (the archive folder); the last column is the current "
