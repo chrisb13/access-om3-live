@@ -33,8 +33,8 @@ experiments:
   - archive: /scratch/tm70/ek4684/access-om3/archive/test1-MCW_100km_era_iaf-908e8682
     run_dir: /scratch/tm70/ek4684/test1
     description: MCW beta long-run
-  - archive: /scratch/tm70/ek4684/mc100_era5_cold
-    run_dir: /scratch/tm70/ek4684/access-om3/archive/mc100_era5_cold
+  - archive: /scratch/tm70/ek4684/access-om3/archive/mc100_era5_cold
+    run_dir: /scratch/tm70/ek4684/mc100_era5_cold
     description: MC run to check if it truncates like MCW with ERA5
     issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1779#issuecomment-6280593733
   - archive: /scratch/tm70/hm6113/access-om3/archive/exp2.0_run2-expt-3d030595
