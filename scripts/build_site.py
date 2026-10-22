@@ -232,6 +232,7 @@ def failure_page(e: str, nb: str, error: str, ran: str, partial_md: str, has_not
 
 TIPS = "https://access-om3-configs.access-hive.org.au/latest/Tips-and-tricks/#mom6-velocity-truncations"
 RECIPE = "https://github.com/ACCESS-NRI/access-eval-recipes/blob/main/ocean/Examine_truncation_data.ipynb"
+TRUNC_NB = "Truncation_locations"  # access-om3-paper-1 notebook whose map is shown in 'Truncation locations'
 
 
 # A pin at the point, zoomed out to regional scale (zoom 5, as in a typical "@lat,lon,5z" Google Maps link)
@@ -323,6 +324,11 @@ def _truncation_text(st: dict, work: bool = False) -> list:
                "they belong to someone else and can't be read.\n"]
     if not t.get("boxes"):
         return md
+    if not work and st.get("truncation_map"):  # the map drawn by the Truncation_locations notebook, if it ran
+        md += ["", f"![Map of MOM6 velocity truncation locations]({st['truncation_map']})\n",
+               f"Map from the [{TRUNC_NB}]({TRUNC_NB}/index.md) notebook (marker size: number of location records; "
+               f"colour: maximum truncated speed), drawn when the notebooks last ran ({st['truncation_map_ran']}), "
+               "so it may not include output folders added since.\n"]
     md += ["", "**Where MOM6 truncates** (1° boxes, most records first; from the `U_velocity_truncations` and "
            "`V_velocity_truncations` files):\n",
            "| Location | Records | Grid cells | Seen in output | Velocity | Layers | Max speed (m/s) | Max CFL "
@@ -1219,6 +1225,8 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
     st["issue"] = entry.get("issue") if isinstance(entry, dict) else None  # where the run is discussed on GitHub
     if from_metadata:  # say so, so it isn't mistaken for a description written for this site
         st["description"] += " *(from the run's metadata.yaml)*"
+    if TRUNC_NB in ok and (docs / "live" / e / TRUNC_NB / f"{TRUNC_NB}_01.png").exists():
+        st["truncation_map"], st["truncation_map_ran"] = f"{TRUNC_NB}/{TRUNC_NB}_01.png", ran.split("<br>")[0]
     (docs / "live" / e).mkdir(parents=True, exist_ok=True)
     if (src / "sypd.png").exists():
         shutil.copy2(src / "sypd.png", docs / "live" / e)
