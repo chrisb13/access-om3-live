@@ -5,15 +5,15 @@
 # request's changes can be seen with real runs. Nothing in $WORK is changed.
 #
 # It can also run notebooks that the nightly job doesn't run yet (e.g. one a pull request adds to
-# experiments.yml), from any access-om3-paper-1 checkout, for each experiment whose archive (or run
-# directory's archive) has a datastore. They run here, one at a time, so keep to quick notebooks.
+# experiments.yml), from any access-om3-paper-1 checkout, against each experiment's datastore, chosen as the
+# nightly job chooses it. They run here, one at a time, so keep to quick notebooks.
 #
 # Usage, from an access-om3-live checkout on a Gadi login node or ARE session:
 #   bash gadi/preview.sh [-w WORK] [-p PAPER] [-n NOTEBOOK]... [-e EXPERIMENT]...
 #     -w  the nightly job's work folder (default /g/data/tm70/cyb561/access-om3-live)
 #     -p  the access-om3-paper-1 checkout to run -n notebooks from (default WORK/access-om3-paper-1)
 #     -n  a notebook to run first, e.g. -n Truncation_locations (repeatable)
-#     -e  run -n notebooks only for this experiment (repeatable; default: all that have a datastore)
+#     -e  run -n notebooks only for this experiment (repeatable; default: all)
 # The site is written to build/site; the script ends by printing how to look at it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,7 +26,7 @@ while getopts "w:p:n:e:" opt; do
     esac
 done
 PAPER=$(readlink -f "${PAPER:-$WORK/access-om3-paper-1}")
-source "$WORK/config.sh"   # EXPERIMENTS, NAMES, RUN_DIRS, CONDA_MODULE (written by the nightly workflow)
+source "$WORK/config.sh"   # EXPERIMENTS, NAMES, CONDA_MODULE (written by the nightly workflow)
 
 command -v module >/dev/null || source /etc/profile
 module use /g/data/xp65/public/modules
@@ -43,23 +43,39 @@ done
 rsync -a --delete "$WORK/status/" status/
 
 # Extra notebooks, run as mkfigs runs them: papermill, with the datastore in a folder named after the
-# experiment (mkfigs takes the experiment's name from it) and the figures written to content/<name>/mkmd
+# experiment (mkfigs takes the experiment's name from it) and the figures written to content/<name>/mkmd.
+# The datastore is chosen as gadi/mkfigs_live.sh chooses it: a .json given in experiments.yml as it is;
+# else payu's in the archive if it covers the newest output folder and lists files in this archive;
+# else one built here (minutes, sometimes much longer).
 CAT=$(mktemp -d)
 trap 'rm -rf "$CAT"' EXIT
 for i in "${!NAMES[@]}"; do
-    e=${NAMES[$i]} archive=${EXPERIMENTS[$i]} run_dir=${RUN_DIRS[$i]:-}
+    e=${NAMES[$i]} out=${EXPERIMENTS[$i]}
     [ ${#nbs[@]} -gt 0 ] || break
     if [ ${#only[@]} -gt 0 ] && [[ " ${only[*]} " != *" $e "* ]]; then continue; fi
-    ds=""
-    for d in "$archive" ${run_dir:+"$run_dir/archive"}; do
-        for f in "$d/experiment_datastore.json" "$d/datastore.json"; do
-            if [ -r "$f" ]; then ds=$f; break 2; fi
-        done
-    done
-    if [ -z "$ds" ]; then echo "$e: no datastore found in its archive; notebooks not run" >&2; continue; fi
+    if [ ! -e "$out" ]; then echo "$e: $out can't be read here; notebooks not run" >&2; continue; fi
     mkdir -p "$CAT/$e" "content/$e/mkmd"
-    ln -sf "$ds" "$CAT/$e/datastore.json"
-    for f in "${ds%.json}".csv*; do [ -e "$f" ] && ln -sf "$f" "$CAT/$e/"; done   # its catalogue, beside it
+    newest=$(ls -d "$out"/output[0-9]* 2>/dev/null | tail -1 || true) how=built
+    if [ -f "$out" ]; then
+        ln -sf "$out" "$CAT/$e/datastore.json"
+        for f in "${out%.json}".*; do [ "$f" = "$out" ] || ln -sf "$f" "$CAT/$e/"; done   # its catalogue (.csv)
+        how=given
+    fi
+    for ds in "$out/experiment_datastore.json" "$out/datastore.json"; do
+        csv=$(ls "${ds%.json}".csv* 2>/dev/null | head -1 || true)
+        if [ -r "$ds" ] && [ -n "$csv" ] && [ -n "$newest" ] && [ "$ds" -nt "$newest" ] \
+           && python3 gadi/datastore_ok.py "$ds" "$csv" "$out"; then
+            ln -sf "$ds" "$CAT/$e/datastore.json"
+            ln -sf "$csv" "$CAT/$e/"   # a relative catalog_file in the json is found next to it
+            how=reused
+            break
+        fi
+    done
+    if [ "$how" = built ]; then
+        echo "$e: building a datastore" >&2
+        build-esm-datastore --builder AccessOm3Builder --expt-dir "$out" --cat-dir "$CAT/$e" --datastore-name datastore \
+            || { echo "$e: couldn't build a datastore; notebooks not run" >&2; continue; }
+    fi
     for nb in "${nbs[@]}"; do
         rm -f "content/$e/mkmd/$nb.md" "content/$e/mkmd/${nb}"_[0-9]*.png   # mkmd appends to an existing page
         echo "$e: running $nb" >&2
@@ -76,7 +92,7 @@ if ! cmp -s requirements.txt "$VENV/requirements.txt" 2>/dev/null; then
     "$VENV/bin/pip" install -q -r requirements.txt
     cp requirements.txt "$VENV/requirements.txt"
 fi
-PATH="$VENV/bin:$PATH" bash scripts/build_preview.sh build/site
+PATH="$VENV/bin:$PATH" bash scripts/build_preview.sh "$ROOT/build/site"   # absolute: mkdocs takes -d relative to build/mkdocs.yml
 
 port=$((8000 + RANDOM % 1000))
 cat <<EOF
