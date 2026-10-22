@@ -76,12 +76,17 @@ for i in "${!NAMES[@]}"; do
         build-esm-datastore --builder AccessOm3Builder --expt-dir "$out" --cat-dir "$CAT/$e" --datastore-name datastore \
             || { echo "$e: couldn't build a datastore; notebooks not run" >&2; continue; }
     fi
+    # Each notebook runs in a folder under PAPER/notebooks (gitignored there), as in the nightly job: mkfigs
+    # looks two folders up from it for the notebook's git history, to list its co-authors
+    run="$PAPER/notebooks/mkfigs_output_preview_$e"
     for nb in "${nbs[@]}"; do
         rm -f "content/$e/mkmd/$nb.md" "content/$e/mkmd/${nb}"_[0-9]*.png   # mkmd appends to an existing page
+        rm -rf "$run" && mkdir -p "$run/mkmd"
         echo "$e: running $nb" >&2
-        (cd "$PAPER/notebooks" && papermill --log-level WARNING "$nb.ipynb" "$ROOT/content/$e/${nb}_rendered.ipynb" \
-            -p esm_file "$CAT/$e/datastore.json" -p papermill True -p cwd "$ROOT/content/$e/" -p nbname "$nb.ipynb") \
+        (cd "$PAPER/notebooks" && papermill --log-level WARNING "$nb.ipynb" "$run/${nb}_rendered.ipynb" \
+            -p esm_file "$CAT/$e/datastore.json" -p papermill True -p cwd "$run/" -p nbname "$nb.ipynb") \
             || echo "$e: $nb failed; see content/$e/${nb}_rendered.ipynb" >&2
+        rsync -a "$run/" "content/$e/" && rm -rf "$run"
     done
 done
 
