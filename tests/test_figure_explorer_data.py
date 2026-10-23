@@ -163,3 +163,109 @@ def test_lines_identical_in_several_runs_become_one_reference(paper, tmp_path):
     assert [len(p["lines"]) for p in own] == [1, 0]
     refs = json.loads((out / "data" / fid / "refs.json").read_text())
     assert [(r["panel"], r["name"]) for r in refs] == [(1, "Total freeze")]
+
+
+def test_a_run_drawn_in_another_runs_figure_keeps_its_line(paper, tmp_path):
+    """timeseries-style notebooks overlay every listed run, so test3v2's line is drawn identically in
+    test4's figure; it stays test3v2's own line (not a shared reference), and test4 does not take it."""
+    t = np.arange("1958-01", "1961-01", dtype="datetime64[M]").astype("datetime64[ns]")  # as xarray gives
+    def fig(run):
+        f, ax = plt.subplots()
+        for r, c in ((T4, "C3"), (T3V2, "C4")):
+            ax.plot(t, np.linspace(3.6, 3.7 if r == T4 else 3.8, t.size), color=c, label=r)
+        ax.set_title("thetaoga")
+        ax.set_xlabel("time")  # as xarray's .plot() does
+        return f
+    blobs = {}
+    for run in (T4, T3V2):
+        md = tmp_path / run / "mkmd"; md.mkdir(parents=True)
+        linedata.write(linedata.capture(fig(run), run=run, notebook="timeseries", fignum=3, title="Timeseries",
+                                        caption=f"thetaoga for {run}.", png="t_03.png", seen=set()), md / "t_03.lines.json")
+        blobs[run] = figuredata.build_bundle(md, run, tmp_path / run, {}).read_bytes()
+    out = tmp_path / "site"
+    with responses.RequestsMock() as mock:
+        _publish(paper, tmp_path, mock, blobs)
+        fed.build(EXPERIMENTS, paper, out, tmp_path / "cache")
+    index = json.loads((out / "index.json").read_text())
+    (fid,) = index["figures"]
+    runs = {r["name"]: r for r in index["runs"]}
+    for run, top in ((T4, 3.7), (T3V2, 3.8)):
+        (p,) = json.loads((out / "data" / fid / f"{runs[run]['id']}.json").read_text())["panels"]
+        assert [line["y"][-1] for line in p["lines"]] == [top]
+        assert all(isinstance(x, str) for x in p["lines"][0]["x"])
+    assert json.loads((out / "data" / fid / "refs.json").read_text()) == []
+    assert index["figures"][fid]["caption"] == "thetaoga for each run."
+    assert runs[T3V2]["start_year"] == 1958
+
+
+def test_numeric_time_x_becomes_dates_and_start_year_follows_own_lines():
+    ns = [np.datetime64("1979-01-16T12", "ns").astype(int).item(), -60_000_000_000, None]
+    bundle = {"figures": [
+        {"panels": [{"x_kind": "number", "x_label": "time", "lines": [{"role": "own", "x": ns}]}]},
+        {"panels": [{"x_kind": "time", "x_label": "Year", "lines": [
+            {"role": "other", "x": [-36484.5, 8765.0]},      # matplotlib date numbers (an observed range)
+            {"role": "own", "x": ["1900-01-16T12:00:00"]}, {"role": "own", "x": ["1900-01-16T12:00:00"]}]}]},
+    ]}
+    assert fed._iso_time_x(bundle) == 2
+    first, second = (rec["panels"][0] for rec in bundle["figures"])
+    assert first["x_kind"] == "time" and first["lines"][0]["x"] == ["1979-01-16T12:00:00", "1969-12-31T23:59:00", None]
+    assert second["lines"][0]["x"] == ["1870-02-09T12:00:00", "1993-12-31T00:00:00"]
+    assert fed._start_year({"length": "52 years"}, bundle) == 1900
+
+
+def test_runs_keep_pinned_colours_and_new_runs_take_free_slots():
+    slots, log = fed.colour_slots(["a", "new", "b"], {"a": 0, "b": 1})
+    assert slots == {"a": 0, "b": 1, "new": 2} and len(log) == 1 and "RUN_COLOURS" in log[0]
+    slots, _ = fed.colour_slots(["new", "b"], {"a": 0, "b": 1})  # a slot freed by a removed run is reused
+    assert slots == {"new": 0, "b": 1}
+
+
+def test_annual_grid_panels_in_year_numbers_become_dates():
+    """SeaIce_mass_budget_climatology figure 4: only the bottom row had the "Year" label (made dates)."""
+    bundle = {"figures": [{"panels": [
+        {"x_kind": "number", "x_label": "", "marks": [{"kind": "span", "x": [2008.5, 2018.5]}],
+         "lines": [{"role": "own", "x": [1958.0, 1959.0]}]},
+        {"x_kind": "time", "x_label": "Year", "marks": [{"kind": "span", "x": [2008.5, 2018.5]}],
+         "lines": [{"role": "own", "x": ["1958-01-01T00:00:00", "1959-01-01T00:00:00"]}]}]}]}
+    fed._iso_time_x(bundle)
+    top, bottom = bundle["figures"][0]["panels"]
+    assert top["x_kind"] == "time" and top["lines"][0]["x"] == bottom["lines"][0]["x"]
+    assert top["marks"][0]["x"] == bottom["marks"][0]["x"] and top["marks"][0]["x"][0].startswith("2008-07")
+
+
+def test_references_are_named_and_sourced_and_sections_split():
+    rules = [{"match": r"(0\d+deg_jra55\w*)(.*)", "name": "ACCESS-OM2 {0}{1}", "intake": 'intake.cat.access_nri["{0}"]'},
+             {"match": r"^ACCESS-OM2$", "notebook": "budget", "by_forcing": {"IAF": {"name": "OM2 iaf"}, "RYF": {"name": "OM2 ryf"}}}]
+    got = fed.describe_reference({"name": "OM2 025deg_jra55_iaf_omip2_cycle1 sans GM"}, "x", {"IAF"}, rules)
+    assert got == {"name": "ACCESS-OM2 025deg_jra55_iaf_omip2_cycle1 sans GM", "intake": 'intake.cat.access_nri["025deg_jra55_iaf_omip2_cycle1"]'}
+    assert fed.describe_reference({"name": "ACCESS-OM2"}, "budget", {"RYF"}, rules) == {"name": "OM2 ryf"}
+    assert fed.describe_reference({"name": "ACCESS-OM2"}, "budget", {"IAF", "RYF"}, rules) == {}
+    assert fed.split_categories({"Circulation": ["MHT", "StraitTransports"], "Sea ice": ["SeaIce_area"]},
+                                {"Strait transports": ["StraitTransports"]}) == {
+        "Circulation": ["MHT"], "Strait transports": ["StraitTransports"], "Sea ice": ["SeaIce_area"]}
+
+
+def test_variable_labels():
+    assert fed.variable_labels("tos_max: Sea Surface Temperature") == {
+        "display": "Sea Surface Temperature maximum (tos_max)", "heading": "tos_max",
+        "heading_sub": "Sea Surface Temperature", "variable": "tos_max"}
+    long = fed.variable_labels("net_fresh_water_global_adjustment: Adjustment needed to adjust net fresh water into ocean to zero")
+    assert long["display"] == "net_fresh_water_global_adjustment" and long["heading_sub"].startswith("Adjustment needed")
+    assert fed.variable_labels("Drake Passage transport") == {}
+
+
+def test_figures_under_one_stem_with_different_panels_merge_by_panel_title(tmp_path):
+    """Timeseries_daily_extreme: tos/sos panels for most runs, mlotst panels for others, all saved as _01."""
+    def fig(fid, titles, run):
+        (tmp_path / "data" / fid).mkdir(parents=True)
+        (tmp_path / "data" / fid / f"{fed._id(run)}.json").write_text(json.dumps(
+            {"panels": [{"lines": [{"name": "", "x": [1], "y": [k]}], "periods": [], "title_full": t} for k, t in enumerate(titles)]}))
+        return {"display": "x", "caption": "", "subtitle": "", "panels": [{"title": t} for t in titles],
+                "runs": {run: {"png": "Timeseries_daily_extreme_from_2D_fields_01.png", "fignum": 1, "periods": []}}}
+    figures = {"a": fig("a", ["tos min", "tos max"], "r1"), "b": fig("b", ["mlotst min", "tos max"], "r2")}
+    log = []
+    fed.merge_figures(figures, {}, tmp_path, [{"into": "Timeseries_daily_extreme_from_2D_fields_01", "panels": "by_title"}], log)
+    (fid,) = figures
+    assert [p["title"] for p in figures[fid]["panels"]] == ["tos min", "tos max", "mlotst min"]
+    r2 = json.loads((tmp_path / "data" / fid / f"{fed._id('r2')}.json").read_text())["panels"]
+    assert [len(p["lines"]) for p in r2] == [0, 1, 1] and r2[1]["lines"][0]["y"] == [1]

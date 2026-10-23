@@ -56,7 +56,7 @@
 .md-typeset .fx-plots h3 { font-size: .68rem; margin: .3rem 0 0; }
 .fx-pane { height: var(--fx-h, 420px); }
 .fx-empty { padding: 2rem 1rem; text-align: center; color: var(--md-default-fg-color--light); border: 1px dashed var(--md-default-fg-color--lighter); border-radius: 6px; }
-.fx-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .64rem; margin: .4rem 0 .8rem; }
+.fx-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .64rem; }
 .fx-it { display: inline-flex; align-items: center; gap: .35rem; }
 .fx-k { color: var(--md-default-fg-color--light); }
 .fx-details { font-size: .66rem; }
@@ -65,3 +65,31 @@
 .md-typeset .fx-notes h3 { font-size: .75rem; margin-top: .8rem; }
 .fx-notes { font-size: .7rem; }
 @media (max-width: 76.1875em) { .fx { grid-template-columns: minmax(0, 1fr); } .fx-rail { position: static; max-height: 45vh; margin-bottom: .8rem; } .fx-grp { grid-template-columns: minmax(0, 1fr); } }
+/* "Use this figure": summary, Python and PNG export, between the plots and the run details */
+.fx-use { border-top: 1px solid var(--md-default-fg-color--lightest); margin-top: .6rem; padding-top: .2rem; font-size: .66rem; }
+.md-typeset .fx-use h3 { font-size: .75rem; margin: .5rem 0 .4rem; }
+.fx-use-row { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .4rem; }
+.fx-use details { margin: .2rem 0; }
+.fx-use summary { cursor: pointer; }
+.fx-code { max-height: 22rem; overflow: auto; font-size: .6rem; line-height: 1.45; padding: .5rem .6rem; margin: .3rem 0;
+  background: var(--md-default-fg-color--lightest); border-radius: 4px; white-space: pre; }
+.fx-png img { max-width: 100%; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 4px; }
+.fx-legend { margin: .2rem 0 .4rem; }
+.fx-om2 > .fx-k { font-size: .62rem; padding-top: .2rem; }
+/* the experiments key above the explorer; hover details on legend entries */
+.fx-key { font-size: .66rem; margin: 0 0 .8rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 4px; padding: .3rem .6rem; }
+.fx-key summary { cursor: pointer; font-weight: 700; }
+.fx-key p { max-width: 70em; }
+.fx-key table { font-size: .6rem; }
+.fx-key code { font-size: .56rem; overflow-wrap: anywhere; }
+.fx-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fx-it[title] { cursor: help; }
+/* the rendered summary */
+.fx-md-view { padding: .3rem .6rem; margin: .3rem 0; border-left: 3px solid var(--md-default-fg-color--lightest); }
+.md-typeset .fx-md-view h4 { font-size: .72rem; margin: .2rem 0 .3rem; }
+.fx-md-view p, .fx-md-view ul { margin: .25rem 0; }
+.fx-md-view table { font-size: .6rem; }
+.fx-md-view code { font-size: .58rem; overflow-wrap: anywhere; white-space: normal; }
+.fx-missing { font-size: .64rem; color: var(--md-default-fg-color--light); margin: 0 0 .3rem; }
+.fx-missing:empty { display: none; }
+.fx-empty b { color: var(--md-default-fg-color); }
