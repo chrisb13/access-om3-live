@@ -7,4 +7,6 @@ build/
 Experiments.md
 config.sh
 status/
+.cache/
+site/
 access-om3-configs.git/
