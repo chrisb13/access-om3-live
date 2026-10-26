@@ -121,6 +121,93 @@ def monitor_plot(series: dict, out: Path) -> bool:
     return True
 
 
+def cost_stats(costs: list) -> dict:
+    """Cost of an experiment per model year, from gadi/run_status.py's run_costs (successful runs that have both an archive
+    output and a PBS log): {runs, model_years, ksu_per_year, avg_ncpus, avg_walltime_h}; {} if there are none."""
+    costs = [c for c in costs or [] if c.get("model_years")]
+    if not costs:
+        return {}
+    years = sum(c["model_years"] for c in costs)
+    return {"runs": len(costs), "model_years": years, "ksu_per_year": sum(c["su"] for c in costs) / 1000 / years,
+            "avg_ncpus": sum(c["ncpus"] for c in costs) / len(costs),
+            "avg_walltime_h": sum(c["walltime_s"] for c in costs) / len(costs) / 3600}
+
+
+def cost_plot(costs: list, out: Path) -> bool:
+    """Draw each run against the model year it reached, in two panels; False if nothing to draw. Top: kSU per model year, wall
+    time and memory used. Bottom: the coupling time step and MOM6's DT (seconds), and stop_n (months, years or days)."""
+    costs = sorted((c for c in costs or [] if c.get("model_years")), key=lambda c: c["run"])
+    if not costs:
+        return False
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("::warning::matplotlib is not installed, so the cost plot is left out")
+        return False
+    xs, total = [], 0.0
+    for c in costs:  # model year reached; if payu didn't record a finish date, the model years counted so far
+        total += c["model_years"]
+        try:
+            d = datetime.fromisoformat(c["model_finish"])
+            xs.append(d.year + (d.timetuple().tm_yday - 1) / 365.25)
+        except (KeyError, TypeError, ValueError):
+            xs.append(total)
+    nan = float("nan")
+
+    def series(key, scale=1.0):  # a value per run; NaN (a gap in the line) where it couldn't be read
+        return [c[key] * scale if c.get(key) is not None else nan for c in costs]
+
+    def has(ys):
+        return any(y == y for y in ys)
+
+    def draw(ax, ys, ylabel, color, headroom=1.1, **kw):  # one line, with an axis label and ticks in the line's colour
+        ax.plot(xs, ys, color=color, marker=kw.pop("marker", "o"), ms=4, lw=2.2, alpha=0.7, **kw)
+        ax.set_ylabel(ylabel, color=color)
+        ax.tick_params(axis="y", colors=color)
+        # from zero, with headroom (a large headroom keeps the line in the lower part of the panel);
+        # an axis shared by two lines fits both
+        top = max([y for y in ys if y == y] or [1]) * headroom
+        ax._top = top = max(top, getattr(ax, "_top", 0))
+        ax.set_ylim(0, top)
+
+    # stop_n is shown in the unit most runs use; a run that used another unit is converted through its model years
+    per_year = {"nyears": 1, "nmonths": 12, "ndays": 365}
+    units = [c["stop_option"] for c in costs if c.get("stop_option") in per_year]
+    unit = max(set(units), key=units.count) if units else None
+
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(10, 6.6), sharex=True, facecolor="white")
+    fig.subplots_adjust(hspace=0.12)
+    draw(a1, [c["su"] / 1000 / c["model_years"] for c in costs], "kSU per model year", "C0")
+    wall = a1.twinx()
+    draw(wall, series("walltime_s", 1 / 3600), "wall time used (h)", "C1")
+    mem = series("mem_gb", 1 / 1024)
+    if has(mem):
+        extra = a1.twinx()  # a second right-hand axis, set out beside the first
+        extra.spines["right"].set_position(("axes", 1.14))
+        draw(extra, mem, "memory used (TB)", "C2")
+    coupling, dt = series("coupling_dt"), series("dt")
+    if has(coupling):
+        draw(a2, coupling, "time step (s)", "C3", label="coupling time step")
+    if has(dt):
+        draw(a2, dt, "time step (s)", "C4", marker="x", ls="--", label="MOM6 DT")
+    if has(coupling) or has(dt):
+        a2.set_ylabel("time step (s)", color="black")
+        a2.tick_params(axis="y", colors="black")
+        a2.legend(loc="best", fontsize=8, frameon=False)
+    else:
+        a2.set_yticks([])
+    if unit:
+        draw(a2.twinx(), [c["model_years"] * per_year[unit] for c in costs], f"stop_n ({unit[1:]})", "C5", headroom=2.5)  # low in the panel, clear of the time steps
+    a2.set_xlabel("model year reached")
+    for ax in (a1, a2):
+        ax.grid(alpha=0.3)
+    fig.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    return True
+
+
 def _when(ts) -> str:
     """A Unix time as Canberra local time, e.g. '2026-10-16 10:20 AEDT'."""
     return datetime.fromtimestamp(ts, timezone.utc).astimezone(CANBERRA).strftime("%Y-%m-%d %H:%M %Z") if ts else ""
@@ -1006,6 +1093,10 @@ def issue_summary(e: str, st: dict) -> str:
           f"- **Model date reached:** {_date(done[-1]['model_finish']) if done else 'unknown'}"
           + (f" ({years:.1f} model years complete)" if years else ""),
           f"- **Average throughput:** {sypd:.2f} SYPD" if sypd else "- **Average throughput:** not known"]
+    cost = cost_stats(st.get("costs"))
+    if cost:
+        md.append(f"- **Average cost:** {cost['ksu_per_year']:.1f} kSU per model year, {cost['avg_ncpus']:.0f} NCPUs requested, "
+                  f"{cost['avg_walltime_h']:.2f} h wall time per run ({cost['runs']} successful runs, {cost['model_years']:.1f} model years)")
     segs = [s for s in (st.get("truncations") or {}).get("segments", []) if s["truncs"] is not None]
     total = sum(s["truncs"] for s in segs)
     md.append(f"- **Truncations:** {total:,} in {sum(1 for s in segs if s['truncs'])} of {len(segs)} output folders"
@@ -1136,11 +1227,30 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
            f"- **Model date reached:** {_date(done[-1]['model_finish']) if done else 'unknown'}",
            f"- **Runs recorded by payu:** {len(runs)}, of which failed: {sum(1 for r in runs if r.get('status') not in (0, None))}", ""]
     md += _check("these counts", checks.archive_counts(archive))
+    cost = cost_stats(st.get("costs"))
+    if sypd_png or cost:
+        md += ["### Model throughput and cost\n"]
     if sypd_png:
-        md += ["### Model throughput\n", "Simulated years per day, made by `plot_sypd.py` from the "
+        md += ["Simulated years per day, made by `plot_sypd.py` from the "
                f"`outputNNN/log/med.log` files of the completed submissions in `{archive}`.\n",
                "![Simulated years per day](sypd.png)\n"]
         md += _check("the rate in each output's med.log", checks.throughput(archive))
+    if cost:
+        ok_runs = sum(1 for r in runs if r.get("status") == 0)
+        where = "`pbs_logs`" + (" and the control directory" if run_dir else "")
+        left_out = (f" The other {ok_runs - cost['runs']} have no PBS log (looked for in {where}) or no output folder, "
+                    "so they are left out." if cost["runs"] < ok_runs else "")
+        md += [f"Cost per model year, from the PBS logs of **{cost['runs']} of the {ok_runs} successful runs**: those that "
+               f"also have an archive output, so cost and model years always cover the same runs.{left_out} Each run's "
+               "model years come from the `stop_n` and `stop_option` in its own `outputNNN/nuopc.runconfig` (so a `stop_n` "
+               "changed part-way through is handled), counting a year as 365 days.\n",
+               "| Runs | Model years | kSU per model year | Average NCPUs requested | Average wall time used (h) |",
+               "|---|---|---|---|---|",
+               f"| {cost['runs']} | {cost['model_years']:.1f} | {cost['ksu_per_year']:.1f} | {cost['avg_ncpus']:.0f} "
+               f"| {cost['avg_walltime_h']:.2f} |", ""]
+        if st.get("_cost_png"):
+            md += ["![Cost per model year and wall time of each run](cost.png)\n"]
+        md += _check("these cost figures", checks.cost(archive, run_dir))
     if runs:
         md += ["### Recent runs\n", f"From payu's job records in `{archive}/payu_jobs`; times are Canberra time.\n",
                "| Run | PBS job | Result | Model period | Wall time (h) | SYPD | Record last modified |",
@@ -1222,6 +1332,7 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
     (docs / "live" / e).mkdir(parents=True, exist_ok=True)
     if (src / "sypd.png").exists():
         shutil.copy2(src / "sypd.png", docs / "live" / e)
+    st["_cost_png"] = cost_plot(st.get("costs"), docs / "live" / e / "cost.png")
     page = (lambda e, st, links, png: datastore_page(e, st, links)) if st.get("datastore_only") else status_page
     (docs / "live" / e / "index.md").write_text(page(e, st, links + (f"\n\n{job_note}" if job_note else ""),
                                                             (src / "sypd.png").exists()))

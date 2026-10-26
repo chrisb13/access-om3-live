@@ -38,9 +38,10 @@ runs.sort(key=lambda r: (int(r.get("payu_current_run") or 0), r.get("timings", {
 '''
 
 
-def _python(body: str) -> list:
-    """A python3 heredoc that reads the run records, then runs body."""
-    return ['python3 - "$A" <<\'EOF\'', *READ_RUNS.splitlines(), "", *body.splitlines(), "EOF"]
+def _python(body: str, run_dir: bool = False) -> list:
+    """A python3 heredoc that reads the run records, then runs body. With run_dir, the control directory R is handed
+    over too, as sys.argv[2]."""
+    return ['python3 - "$A"' + (' "$R"' if run_dir else "") + " <<'EOF'", *READ_RUNS.splitlines(), "", *body.splitlines(), "EOF"]
 
 
 def model_date(run_dir: str) -> str:
@@ -198,6 +199,45 @@ def throughput(archive: str) -> str:
            "    # 'ypd' (the second-last word), adds them up and counts them, then prints the average at the end.",
            """    awk -v name="$(basename "$o")" '/Model Date:/ && /ypd/ {count++; total += $(NF-1)} END {if (count) printf "%s: %d rate lines, mean %.2f ypd\\n", name, count, total/count}' "$o/log/med.log\"""",
            "done"])
+
+
+def cost(archive: str, run_dir: str = None) -> str:
+    """The cost-per-model-year line: successful runs that have both an archive output and a PBS log, the log being
+    looked for where the page looks: the archive's pbs_logs and, when there is one, the control directory."""
+    where = "pbs_logs" + (" or the control directory R" if run_dir else "")
+    lines = _note("WHAT THIS DOES: re-computes the cost line. For every run payu recorded as successful, it needs two things: "
+                  "that run's output folder (output NNN is run NNN), from which it reads stop_n and stop_option in the "
+                  f"nuopc.runconfig archived there to get the model years that run covered; and the PBS log of its job "
+                  f"(in {where}), from which it reads Service Units, NCPUs Requested and Walltime Used. A run missing "
+                  "either is skipped, so cost and model years always cover the same runs. A year is counted as 365 days.")
+    lines += _vars(archive, run_dir) + [""]
+    return "\n".join(lines + _python(
+        'import re\n\n'
+        'PER_YEAR = {"nyears": 1, "nmonths": 12, "ndays": 365}     # how many stop_n units make a model year\n'
+        'su = years = cpus = wall = n = 0\n'
+        'for r in runs:\n'
+        '    run, job = r.get("payu_current_run"), r.get("scheduler_job_id")\n'
+        '    if r.get("payu_run_status") != 0 or run is None or not job:\n'
+        '        continue                                          # only successful runs\n'
+        '    out = "%s/output%03d" % (archive, int(run))\n'
+        '    try:\n'
+        '        cfg = open(out + "/nuopc.runconfig").read()\n'
+        '        stop_n = float(re.search(r"^\\s*stop_n\\s*=\\s*(\\S+)", cfg, re.M).group(1))\n'
+        '        unit = re.search(r"^\\s*stop_option\\s*=\\s*(\\S+)", cfg, re.M).group(1)\n'
+        '        dirs = [archive + "/pbs_logs"] + sys.argv[2:3]        # where PBS logs are: pbs_logs, and the control directory\n'
+        '        log = [open(p).read() for d in dirs for p in glob.glob(d + "/*.o" + str(job).split(".")[0] + "*")][0]\n'
+        '        s = float(re.search(r"Service Units:\\s+([\\d.]+)", log).group(1))\n'
+        '        c = int(re.search(r"NCPUs Requested:\\s+(\\d+)", log).group(1))\n'
+        '        h, m, sec = map(int, re.search(r"Walltime Used:\\s+(\\d+):(\\d+):(\\d+)", log).groups())\n'
+        '    except (OSError, AttributeError, IndexError):\n'
+        '        continue                                          # no output folder or no PBS log: skip this run\n'
+        '    years += stop_n / PER_YEAR[unit]\n'
+        '    su, cpus, wall, n = su + s, cpus + c, wall + h * 3600 + m * 60 + sec, n + 1\n'
+        'if n:\n'
+        '    print("runs=%d model_yrs=%.1f kSU/yr=%.1f avg_NCPUs=%.0f avg_walltime_h=%.2f"\n'
+        '          % (n, years, su / 1000 / years, cpus / n, wall / n / 3600))\n'
+        'else:\n'
+        '    print("no successful run with both an output folder and a PBS log")', run_dir=bool(run_dir)))
 
 
 SETTINGS_FILES = "config.yaml MOM_input MOM_override nuopc.runconfig ice_in"
