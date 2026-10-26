@@ -70,5 +70,5 @@ project: tm70
 # What the notebooks always need: xp65 (conda environment) and ik11 (the ACCESS-OM2 run
 # that timeseries compares against). Each run's own /g/data or /scratch project is added
 # automatically; add any project that an experiment's own notebooks read from.
-storage: gdata/xp65+gdata/ik11
+storage: gdata/xp65+gdata/ik11+gdata/av17
 conda_module: conda/analysis3-26.08
