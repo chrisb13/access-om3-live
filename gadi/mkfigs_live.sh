@@ -3,7 +3,7 @@
 #PBS -q normal
 #PBS -l ncpus=16
 #PBS -l mem=190GB
-#PBS -l jobfs=1GB
+#PBS -l jobfs=20GB
 #PBS -l walltime=24:00:00
 # One job per experiment. A 4-hour job with 120 GB ran out of walltime on its second experiment
 # (Oct 2026), using 105 GB with the dask workers pausing at their memory limit; long and 8 km
