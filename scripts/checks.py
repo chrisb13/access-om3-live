@@ -91,11 +91,13 @@ def truncations(archive: str, run_dir: str = None, work: bool = False, example: 
     lines += _vars(None if work else archive, run_dir)
     lines += ["", f"# Step 1: for each {folder}: how many truncations MOM6 reported, the largest CFL number, and how many "
                   "location records were written", f"for o in {where}; do",
-              "    # ocean.stats is a table with one line per time step. Its 3rd column ('Truncs') is the truncations at that",
-              "    # step. awk adds that column up. (-F, means the columns are separated by commas. The header line is skipped",
-              "    # because its first column is not a number.)",
+              "    # ocean.stats is a table with one line per ENERGYSAVEDAYS (usually once per model day), not per time step.",
+              "    # Its 3rd column ('Truncs') is the number of truncations since the previous line, so awk adds it up to get the",
+              "    # total. (-F, means the columns are separated by commas. The header line is skipped because its first",
+              "    # column is not a number.)",
               """    total=$(awk -F, '$1+0 == $1 {sum += $3} END {print sum+0}' "$o/ocean.stats" 2>/dev/null)""",
-              "    # The 5th column holds two numbers; the second one is the CFL number. awk keeps the largest.",
+              "    # The 5th column holds two numbers; the second is the CFL at the moment that line was written (a snapshot,",
+              "    # not the peak over the interval). awk keeps the largest of these snapshots.",
               """    cfl=$(awk -F, '$1+0 == $1 {split($5, a, " "); if (a[2] > max) max = a[2]} END {if (max != "") printf "%.2f", max}' "$o/ocean.stats" 2>/dev/null)""",
               "    # Every truncation also gets a 'location record' in the U and V files. grep -c counts the matching lines.",
               """    u=$(grep -c 'velocity violation' "$o/U_velocity_truncations" 2>/dev/null)""",
