@@ -15,7 +15,7 @@ running() {   # is PBS job $1 still queued or running?
     [ -n "$1" ] && qstat -f "$1" 2>/dev/null | grep -qE 'job_state = [QRHE]'
 }
 jobinfo() {   # exit status and resources used by finished PBS job $1, as JSON (empty fields if PBS has forgotten it)
-    qstat -xf "$1" 2>/dev/null | awk -F' = ' -v j="$1" '/Exit_status/ {x=$2} /resources_used.walltime/ {w=$2}
+    { qstat -xf "$1" 2>/dev/null || true; } | awk -F' = ' -v j="$1" '/Exit_status/ {x=$2} /resources_used.walltime/ {w=$2}
         /resources_used.mem =/ {m=$2} END {printf "{\"job\": \"%s\", \"exit\": \"%s\", \"walltime\": \"%s\", \"mem\": \"%s\"}", j, x, w, m}'
 }
 note() {   # $1: experiment, $2: what this run did with it; for the workflow log and its run summary
