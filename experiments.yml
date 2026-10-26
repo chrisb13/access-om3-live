@@ -63,6 +63,7 @@ notebooks:
   - timeseries
   - Timeseries_daily_extreme_from_2D_fields
   - temp-salt-vs-depth-time
+  - SeaIce_area 
 
 # PBS settings for the nightly job.
 project: tm70
