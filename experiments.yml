@@ -30,12 +30,12 @@ experiments:
   - archive: /g/data/ol01/outputs/access-om3-100km/MC_100km_jra_iaf+wombatlite-test1-e1de2a94
     run_dir: /g/data/tm70/ml0072/COMMON/git_repos/MC_100km_jra_iaf+wombatlite-test1
     issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1669
-  - archive: /scratch/tm70/ek4684/access-om3/archive/test1-MCW_100km_era_iaf-908e8682
-    run_dir: /scratch/tm70/ek4684/test1
-    description: MCW beta long-run
-  - archive: /scratch/tm70/ek4684/access-om3/archive/mc100_era5_cold
+  - archive: /scratch/tm70/ek4684/access-om3/archive/MCW_100km_era_iaf-test1-961264ad
+    run_dir: /scratch/tm70/ek4684/MCW_100km_era_iaf-test1
+    description: MCW 100 km ERA5 IAF long run 1958-2000 (1800 s coupling, waves)
+  - archive: /scratch/tm70/ek4684/access-om3/archive/MC_100km_era_iaf-test1-1d86aa55
     run_dir: /scratch/tm70/ek4684/mc100_era5_cold
-    description: MC run to check if it truncates like MCW with ERA5
+    description: MC 100 km ERA5 IAF (no waves), 1958-2024, finished
     issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1779#issuecomment-6280593733
   - archive: /scratch/tm70/hm6113/access-om3/archive/exp2.0_run2-expt-3d030595
     description: Helens regional superoz 
