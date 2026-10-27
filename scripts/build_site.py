@@ -123,12 +123,14 @@ def monitor_plot(series: dict, out: Path) -> bool:
 
 def cost_stats(costs: list) -> dict:
     """Cost of an experiment per model year, from gadi/run_status.py's run_costs (successful runs that have both an archive
-    output and a PBS log): {runs, model_years, ksu_per_year, avg_ncpus, avg_walltime_h}; {} if there are none."""
+    output and a PBS log): {runs, model_years, total_ksu, ksu_per_year, avg_ncpus, avg_walltime_h}; {} if there are none.
+    total_ksu is the sum of the Service Units charged in those runs' PBS logs, i.e. the experiment's cost so far."""
     costs = [c for c in costs or [] if c.get("model_years")]
     if not costs:
         return {}
     years = sum(c["model_years"] for c in costs)
-    return {"runs": len(costs), "model_years": years, "ksu_per_year": sum(c["su"] for c in costs) / 1000 / years,
+    return {"runs": len(costs), "model_years": years, "total_ksu": sum(c["su"] for c in costs) / 1000,
+            "ksu_per_year": sum(c["su"] for c in costs) / 1000 / years,
             "avg_ncpus": sum(c["ncpus"] for c in costs) / len(costs),
             "avg_walltime_h": sum(c["walltime_s"] for c in costs) / len(costs) / 3600}
 
@@ -1095,6 +1097,7 @@ def issue_summary(e: str, st: dict) -> str:
           f"- **Average throughput:** {sypd:.2f} SYPD" if sypd else "- **Average throughput:** not known"]
     cost = cost_stats(st.get("costs"))
     if cost:
+        md.append(f"- **Total cost so far:** {cost['total_ksu']:,.0f} kSU ({cost['runs']} successful runs, {cost['model_years']:.1f} model years)")
         md.append(f"- **Average cost:** {cost['ksu_per_year']:.1f} kSU per model year, {cost['avg_ncpus']:.0f} NCPUs requested, "
                   f"{cost['avg_walltime_h']:.2f} h wall time per run ({cost['runs']} successful runs, {cost['model_years']:.1f} model years)")
     segs = [s for s in (st.get("truncations") or {}).get("segments", []) if s["truncs"] is not None]
@@ -1244,9 +1247,9 @@ def status_page(e: str, st: dict, nb_links: str, sypd_png: bool) -> str:
                f"also have an archive output, so cost and model years always cover the same runs.{left_out} Each run's "
                "model years come from the `stop_n` and `stop_option` in its own `outputNNN/nuopc.runconfig` (so a `stop_n` "
                "changed part-way through is handled), counting a year as 365 days.\n",
-               "| Runs | Model years | kSU per model year | Average NCPUs requested | Average wall time used (h) |",
-               "|---|---|---|---|---|",
-               f"| {cost['runs']} | {cost['model_years']:.1f} | {cost['ksu_per_year']:.1f} | {cost['avg_ncpus']:.0f} "
+               "| Runs | Model years | Total kSU | kSU per model year | Average NCPUs requested | Average wall time used (h) |",
+               "|---|---|---|---|---|---|",
+               f"| {cost['runs']} | {cost['model_years']:.1f} | {cost['total_ksu']:,.0f} | {cost['ksu_per_year']:.1f} | {cost['avg_ncpus']:.0f} "
                f"| {cost['avg_walltime_h']:.2f} |", ""]
         if st.get("_cost_png"):
             md += ["![Cost per model year and wall time of each run](cost.png)\n"]
@@ -1352,8 +1355,10 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
                if st.get("runs") else "–")
     issue = f"[GitHub issue]({st['issue']})" if st.get("issue") else ""
     described = " – ".join(x for x in (st["description"], issue) if x) or "–"
+    cost = cost_stats(st.get("costs"))  # total kSU charged by the runs that have a PBS log; – if none could be read
+    total = f"{cost['total_ksu']:,.0f}" if cost else "–"
     return ({e: [f"live/{e}/index.md", *pages]},
-            f"| [{e}]({e}/index.md) | {described} | {reached} | {ran} | {shown or '–'} | {broke or '–'} |",
+            f"| [{e}]({e}/index.md) | {described} | {reached} | {total} | {ran} | {shown or '–'} | {broke or '–'} |",
             latest)
 
 
@@ -1442,7 +1447,7 @@ def main(summary_md: str) -> None:
         notebooks = (entry.get("notebooks") if isinstance(entry, dict) else None) or cfg["notebooks"]  # own list replaces
         e = ename(path)
         if e == "archive":  # submit.sh skips these: the link's target folder must be listed instead
-            listed.append((-1, None, f"| `{path}` | | ⚠️ not monitored: list the folder this `archive` link points to | | | |"))
+            listed.append((-1, None, f"| `{path}` | | ⚠️ not monitored: list the folder this `archive` link points to | | | | |"))
             continue
         try:
             nav, row, latest = experiment_pages(e, entry, notebooks, docs)
@@ -1454,7 +1459,7 @@ def main(summary_md: str) -> None:
             (docs / "live" / e / "index.md").write_text(
                 f"# {e}\n\n⚠️ This experiment's pages could not be built:\n\n```text\n{traceback.format_exc()}```\n")
             nav, latest = {e: [f"live/{e}/index.md"]}, 0
-            row = f"| [{e}]({e}/index.md) | | ⚠️ pages could not be built (see its page) | | | |"
+            row = f"| [{e}]({e}/index.md) | | ⚠️ pages could not be built (see its page) | | | | |"
         listed.append((latest, nav, row))
     # Most recently active run first (latest payu record), in the table and the menu
     for latest, nav, row in sorted(listed, key=lambda x: -x[0]):
@@ -1482,9 +1487,9 @@ def main(summary_md: str) -> None:
         "    OM3 Monitor pages and the code that builds them were written mostly by Claude with feedback from "
         "[@chrisb13](https://github.com/chrisb13/). Each status page has copyable checks that one can run on Gadi. "
         "Please report anything wrong or unclear: see [Contributing and feedback](../contributing.md).\n\n"
-        "| Experiment | Description | Latest submission (model date reached)<br>last payu record ▾ | Notebooks last run "
-        "| Notebooks shown "
-        "| Failed |\n|---|---|---|---|---|---|\n"
+        "| Experiment | Description | Latest submission (model date reached)<br>last payu record ▾ | Total cost (kSU) "
+        "| Notebooks last run | Notebooks shown "
+        "| Failed |\n|---|---|---|---|---|---|---|\n"
         + "\n".join(rows) + "\n" + plot + "\n" + help_text)
 
     if os.environ.get("GITHUB_STEP_SUMMARY"):  # shown at the top of the workflow run's page
