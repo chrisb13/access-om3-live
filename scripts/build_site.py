@@ -165,7 +165,8 @@ def cost_plot(costs: list, out: Path) -> bool:
         return any(y == y for y in ys)
 
     def draw(ax, ys, ylabel, color, headroom=1.1, **kw):  # one line, with an axis label and ticks in the line's colour
-        ax.plot(xs, ys, color=color, marker=kw.pop("marker", "o"), ms=4, lw=2.2, alpha=0.7, **kw)
+        line, = ax.plot(xs, ys, color=color, marker=kw.pop("marker", "o"), ms=4, lw=2.2, alpha=0.7,
+                        label=kw.pop("label", ylabel), **kw)
         ax.set_ylabel(ylabel, color=color)
         ax.tick_params(axis="y", colors=color)
         # from zero, with headroom (a large headroom keeps the line in the lower part of the panel);
@@ -173,6 +174,7 @@ def cost_plot(costs: list, out: Path) -> bool:
         top = max([y for y in ys if y == y] or [1]) * headroom
         ax._top = top = max(top, getattr(ax, "_top", 0))
         ax.set_ylim(0, top)
+        return line
 
     # stop_n is shown in the unit most runs use; a run that used another unit is converted through its model years
     per_year = {"nyears": 1, "nmonths": 12, "ndays": 365}
@@ -181,27 +183,39 @@ def cost_plot(costs: list, out: Path) -> bool:
 
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(10, 6.6), sharex=True, facecolor="white")
     fig.subplots_adjust(hspace=0.12)
-    draw(a1, [c["su"] / 1000 / c["model_years"] for c in costs], "kSU per model year", "C0")
+    a1.set_title("Cost, resources and time steps of each successful run")
+    top_lines = [draw(a1, [c["su"] / 1000 / c["model_years"] for c in costs], "kSU per model year", "C0")]
     wall = a1.twinx()
-    draw(wall, series("walltime_s", 1 / 3600), "wall time used (h)", "C1")
+    # lower in the panel: with fixed NCPUs and model years per run, kSU per model year is proportional to wall time, so on
+    # the same headroom the two lines would coincide and hide the blue one
+    top_lines.append(draw(wall, series("walltime_s", 1 / 3600), "wall time used (h)", "C1", headroom=1.6))
+    top_ax = wall
     mem = series("mem_gb", 1 / 1024)
     if has(mem):
         extra = a1.twinx()  # a second right-hand axis, set out beside the first
-        extra.spines["right"].set_position(("axes", 1.14))
-        draw(extra, mem, "memory used (TB)", "C2")
+        extra.spines["right"].set_position(("axes", 1.09))
+        top_lines.append(draw(extra, mem, "memory used (TB)", "C2"))
+        top_ax = extra
     coupling, dt = series("coupling_dt"), series("dt")
+    bottom_lines, bottom_ax = [], a2
     if has(coupling):
-        draw(a2, coupling, "time step (s)", "C3", label="coupling time step")
+        bottom_lines.append(draw(a2, coupling, "time step (s)", "C3", label="coupling time step"))
     if has(dt):
-        draw(a2, dt, "time step (s)", "C4", marker="x", ls="--", label="MOM6 DT")
+        bottom_lines.append(draw(a2, dt, "time step (s)", "C4", marker="x", ls="--", label="MOM6 DT"))
     if has(coupling) or has(dt):
         a2.set_ylabel("time step (s)", color="black")
         a2.tick_params(axis="y", colors="black")
-        a2.legend(loc="best", fontsize=8, frameon=False)
     else:
         a2.set_yticks([])
     if unit:
-        draw(a2.twinx(), [c["model_years"] * per_year[unit] for c in costs], f"stop_n ({unit[1:]})", "C5", headroom=2.5)  # low in the panel, clear of the time steps
+        bottom_ax = a2.twinx()
+        bottom_lines.append(draw(bottom_ax, [c["model_years"] * per_year[unit] for c in costs], f"stop_n ({unit[1:]})", "C5",
+                                 headroom=2.5))  # low in the panel, clear of the time steps
+    # every line of a panel in one legend, on its top-most axis so no line is drawn over it; along the bottom, which the
+    # lines (all from zero, with headroom) mostly leave clear
+    for ax, lines in ((top_ax, top_lines), (bottom_ax, bottom_lines)):
+        if lines:
+            ax.legend(handles=lines, loc="lower center", ncol=len(lines), fontsize=8, framealpha=0.85, edgecolor="none")
     a2.set_xlabel("model year reached")
     for ax in (a1, a2):
         ax.grid(alpha=0.3)
