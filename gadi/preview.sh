@@ -83,10 +83,26 @@ for i in "${!NAMES[@]}"; do
         rm -f "content/$e/mkmd/$nb.md" "content/$e/mkmd/${nb}"_[0-9]*.png   # mkmd appends to an existing page
         rm -rf "$run" && mkdir -p "$run/mkmd"
         echo "$e: running $nb" >&2
-        (cd "$PAPER/notebooks" && papermill --log-level WARNING "$nb.ipynb" "$run/${nb}_rendered.ipynb" \
+        (cd "$PAPER/notebooks" && papermill --log-level WARNING -k python3 "$nb.ipynb" "$run/${nb}_rendered.ipynb" \
             -p esm_file "$CAT/$e/datastore.json" -p papermill True -p cwd "$run/" -p nbname "$nb.ipynb") \
-            || echo "$e: $nb failed; see content/$e/${nb}_rendered.ipynb" >&2
+            || { ok=0; echo "$e: $nb failed; see content/$e/${nb}_rendered.ipynb" >&2; }
         rsync -a "$run/" "content/$e/" && rm -rf "$run"
+        # The site shows a notebook as failed from mkfigs_errors.log (copied from the nightly run above):
+        # replace this notebook's entry in it with this run's result
+        errlog="content/$e/mkmd/mkfigs_errors.log" sep=$(printf '=%.0s' {1..56})
+        if [ -f "$errlog" ]; then
+            awk -v nb="$nb" '{ l[NR] = $0 } END { keep = 1
+                for (i = 1; i <= NR; i++) {
+                    if (l[i] ~ /^=+$/ && l[i + 1] ~ /^FAILED: /) keep = (l[i + 1] != "FAILED: " nb)
+                    if (keep) print l[i] } }' "$errlog" > "$errlog.new" && mv "$errlog.new" "$errlog"
+        fi
+        if [ "${ok:-1}" = 0 ]; then
+            { printf '%s\nFAILED: %s\n%s\n' "$sep" "$nb" "$sep"
+              jq -r '[.cells[].outputs[]? | select(.output_type == "error") | "\(.ename): \(.evalue)"][0]
+                     // "(no error output found in rendered notebook)"' "content/$e/${nb}_rendered.ipynb"
+              echo; } >> "$errlog"
+        fi
+        unset ok
     done
 done
 
