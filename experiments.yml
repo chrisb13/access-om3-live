@@ -57,7 +57,7 @@ experiments:
 # Notebooks run for every experiment, from this access-om3-paper-1 commit (a full hash, so
 # nothing changes until it is updated here): PR #137's head, rebased onto main on 2026-10-17.
 # Once PR #137 is merged, use the merge commit on main.
-paper_ref: d2a7f468b45ae5629e3c6af59935c6e9aa4a2dd2
+paper_ref: f563e4edfeea3c19869abdbfde98d16aa0a50f36
 notebooks:
   - ocean_stats
   - timeseries
