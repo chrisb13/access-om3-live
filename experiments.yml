@@ -24,9 +24,6 @@ experiments:
     run_dir: /g/data/tm70/cyb561/access-om3-runs/8k/MC_8km_jra_ryf-test2
     description: 8km jra_ryf-test2
     issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1755
-  - archive: /scratch/tm70/cyb561/access-om3/archive/MC_8km_jra_ryf-test1-expt-4f2841fe
-    run_dir: /g/data/tm70/cyb561/access-om3-runs/8k/MC_8km_jra_ryf-test1
-    description: 8km jra_ryf-test1
   - archive: /g/data/ol01/outputs/access-om3-100km/MC_100km_jra_iaf+wombatlite-test1-e1de2a94
     run_dir: /g/data/tm70/ml0072/COMMON/git_repos/MC_100km_jra_iaf+wombatlite-test1
     issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1669
