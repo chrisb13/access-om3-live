@@ -371,6 +371,81 @@ def datastore_summary(path):
     return out
 
 
+def stop_clock(output):
+    """{stop_n, stop_option, model_years} for one output folder, from the nuopc.runconfig archived in it, so a stop_n (or
+    unit) changed part-way through an experiment is still right for every output; None if it can't be read."""
+    path = os.path.join(output, "nuopc.runconfig")
+    if not readable(path):
+        return None
+    try:
+        with open(path) as f:
+            cfg = parse_runconfig(f.read())
+        n, opt = float(cfg["CLOCK_attributes.stop_n"]), cfg["CLOCK_attributes.stop_option"].lower()
+    except (OSError, KeyError, ValueError):
+        return None
+    per_year = {"nyear": 1, "nyears": 1, "nmonth": 12, "nmonths": 12, "nday": 365, "ndays": 365}  # 365-day (noleap) years
+    return {"stop_n": n, "stop_option": opt, "model_years": n / per_year[opt]} if opt in per_year else None
+
+
+def first_number(path, pattern):
+    """The first match of pattern (one number in group 1, searched line by line) in a text file, as a float; None if the
+    file can't be read or has no match."""
+    try:
+        with open(path) as f:
+            m = re.search(pattern, f.read(), re.M)
+        return float(m.group(1)) if m else None
+    except (OSError, ValueError):
+        return None
+
+
+def time_steps(output):
+    """(coupling time step, MOM6 DT), both in seconds, from the nuopc.runseq and MOM_input archived in one output
+    folder: the coupling step is the first '@<seconds>' line of the run sequence, DT the first uncommented 'DT = ' line."""
+    return (first_number(os.path.join(output, "nuopc.runseq"), r"^\s*@(\d+(?:\.\d+)?)"),
+            first_number(os.path.join(output, "MOM_input"), r"^\s*DT\s*=\s*([-+\d.eE]+)"))
+
+
+def pbs_usage(job_id, dirs):
+    """{ncpus, su, walltime_s} from the 'Resource Usage' block of a job's PBS output log (<jobname>.o<job id>, as copied to
+    the archive's pbs_logs or left in the control directory); None if no log for that job can be found."""
+    job_id = str(job_id).split(".")[0]  # payu records '182007017.gadi-pbs'; the log is named '<jobname>.o182007017'
+    for d in dirs:
+        for path in glob.glob(os.path.join(d, "*.o%s*" % job_id)):
+            if not readable(path):
+                continue
+            text = tail(path, lines=40)
+            su = re.search(r"Service Units:\s+([\d.]+)", text)
+            cpus = re.search(r"NCPUs Requested:\s+(\d+)", text)
+            wall = re.search(r"Walltime Used:\s+(\d+):(\d+):(\d+)", text)
+            mem = re.search(r"Memory Used:\s+([\d.]+)\s*([KMGT]?B)", text, re.I)
+            if su and cpus and wall:
+                h, m, s = (int(x) for x in wall.groups())
+                gb = {"B": 1 / 1024 ** 3, "KB": 1 / 1024 ** 2, "MB": 1 / 1024, "GB": 1, "TB": 1024}
+                return {"ncpus": int(cpus.group(1)), "su": float(su.group(1)), "walltime_s": h * 3600 + m * 60 + s,
+                        "mem_gb": float(mem.group(1)) * gb[mem.group(2).upper()] if mem else None}
+    return None
+
+
+def run_costs(archive, run_dir, runs):
+    """One record per successful payu run that has BOTH its archive output (output NNN is run NNN) and its PBS log:
+    {run, stop_n, stop_option, model_years, coupling_dt, dt, ncpus, su, walltime_s, mem_gb}. Runs missing either are left
+    out, so the totals never mix cost from some runs with model years from others. coupling_dt, dt and mem_gb are None
+    where they can't be read."""
+    dirs = [os.path.join(archive, "pbs_logs")] + ([run_dir] if run_dir else [])
+    costs = []
+    for r in runs:
+        if r.get("payu_run_status", r.get("status")) != 0 or not str(r.get("run")).isdigit():
+            continue
+        out = os.path.join(archive, "output%03d" % int(r["run"]))
+        clock = stop_clock(out)
+        usage = pbs_usage(r.get("job_id"), dirs) if r.get("job_id") else None
+        if clock and usage:
+            coupling, dt = time_steps(out)
+            costs.append(dict(usage, **clock, run=int(r["run"]), coupling_dt=coupling, dt=dt, mtime=r.get("mtime"),
+                              model_finish=r.get("model_finish")))
+    return costs
+
+
 def main(archive, dest, run_dir=None):
     """Collect payu run records (payu_jobs/*/run/*.json), output count and recent log tails."""
     if archive.endswith(".json"):  # an experiment given as its datastore (e.g. ACCESS-CM3): no payu records to read
@@ -406,6 +481,7 @@ def main(archive, dest, run_dir=None):
         json.dump({"archive": archive, "outputs": len(outputs),
                    "latest_output": os.path.basename(outputs[-1]) if outputs else None,
                    "runs": runs,
+                   "costs": run_costs(archive, run_dir, runs),
                    "logs": logs_of(logs),
                    "metadata": open(meta).read() if readable(meta) else None,
                    "truncations": truncations(outputs),
