@@ -296,8 +296,11 @@ def _truncation_text(st: dict, work: bool = False) -> list:
         md += ["*Location records* are the detailed records MOM6 also writes, one per truncation, to "
                "`U_velocity_truncations` (zonal velocity) and `V_velocity_truncations` (meridional velocity); the "
                "location table below is built from them. MOM6 writes at most 50 per PE per run, so there are usually "
-               "fewer of them than truncations; – means no file of that kind.\n",
-               "| Output folder | Model period | Truncations | Max CFL | Location records (U / V) | PEs at the record cap |",
+               "fewer of them than truncations; – means no file of that kind. *Max CFL* is the largest CFL number in "
+               "`ocean.stats`, which MOM6 writes once per `ENERGYSAVEDAYS` (usually daily). Each line holds the CFL at "
+               "the moment it was written, a snapshot rather than the peak since the previous line, so it can be well "
+               "below the CFL that caused a truncation in between (the location table below has those).\n",
+               "| Output folder | Model period | Truncations | Max CFL (daily snapshots) | Location records (U / V) | PEs at the record cap |",
                "|---|---|---:|---:|---|---|"]
     for s in ([] if work else hit):
         rec = " / ".join(str(s["records"].get(uv, "–")) for uv in "UV") if s["records"] else "–"
