@@ -1371,8 +1371,9 @@ def experiment_pages(e: str, entry, notebooks: list, docs: Path) -> tuple:
     described = " – ".join(x for x in (st["description"], issue) if x) or "–"
     cost = cost_stats(st.get("costs"))  # total kSU charged by the runs that have a PBS log; – if none could be read
     total = f"{cost['total_ksu']:,.0f}" if cost else "–"
+    per_year = f"{cost['ksu_per_year']:,.1f}" if cost else "–"
     return ({e: [f"live/{e}/index.md", *pages]},
-            f"| [{e}]({e}/index.md) | {described} | {reached} | {total} | {ran} | {shown or '–'} | {broke or '–'} |",
+            f"| [{e}]({e}/index.md) | {described} | {reached} | {total} | {per_year} | {ran} | {shown or '–'} | {broke or '–'} |",
             latest)
 
 
@@ -1502,8 +1503,8 @@ def main(summary_md: str) -> None:
         "[@chrisb13](https://github.com/chrisb13/). Each status page has copyable checks that one can run on Gadi. "
         "Please report anything wrong or unclear: see [Contributing and feedback](../contributing.md).\n\n"
         "| Experiment | Description | Latest submission (model date reached)<br>last payu record ▾ | Total cost (kSU) "
-        "| Notebooks last run | Notebooks shown "
-        "| Failed |\n|---|---|---|---|---|---|---|\n"
+        "| kSU/year | Notebooks last run | Notebooks shown "
+        "| Failed |\n|---|---|---|---|---|---|---|---|\n"
         + "\n".join(rows) + "\n" + plot + "\n" + help_text)
 
     if os.environ.get("GITHUB_STEP_SUMMARY"):  # shown at the top of the workflow run's page

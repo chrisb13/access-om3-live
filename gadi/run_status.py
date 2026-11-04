@@ -383,7 +383,7 @@ def stop_clock(output):
         n, opt = float(cfg["CLOCK_attributes.stop_n"]), cfg["CLOCK_attributes.stop_option"].lower()
     except (OSError, KeyError, ValueError):
         return None
-    per_year = {"nyear": 1, "nyears": 1, "nmonth": 12, "nmonths": 12, "nday": 365, "ndays": 365}  # 365-day (noleap) years
+    per_year = {"nyears": 1, "nmonths": 12, "ndays": 365}  # 365-day (noleap) years
     return {"stop_n": n, "stop_option": opt, "model_years": n / per_year[opt]} if opt in per_year else None
 
 
