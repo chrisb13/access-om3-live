@@ -300,7 +300,7 @@ def _truncation_text(st: dict, work: bool = False) -> list:
                "`ocean.stats`, which MOM6 writes once per `ENERGYSAVEDAYS` (usually daily). Each line holds the CFL at "
                "the moment it was written, a snapshot rather than the peak since the previous line, so it can be well "
                "below the CFL that caused a truncation in between (the location table below has those).\n",
-               "| Output folder | Model period | Truncations | Max CFL (daily snapshots) | Location records (U / V) | PEs at the record cap |",
+               "| Output folder | Model period | Truncations | Max CFL (`ocean.stats` snapshots) | Location records (U / V) | PEs at the record cap |",
                "|---|---|---:|---:|---|---|"]
     for s in ([] if work else hit):
         rec = " / ".join(str(s["records"].get(uv, "–")) for uv in "UV") if s["records"] else "–"
