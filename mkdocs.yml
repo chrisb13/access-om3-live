@@ -80,3 +80,4 @@ extra_css:
 
 extra_javascript:
   - js/config_diff.js   # from pages/
+  - js/experiment_filter.js   # from pages/ (filter buttons for the Experiments tables)
