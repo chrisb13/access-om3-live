@@ -77,6 +77,8 @@ extra_css:
   - css/custom.css
   - css/wide.css   # from pages/wide.css
   - css/config_diff.css   # from pages/
+  - css/figure_explorer.css   # from pages/
 
 extra_javascript:
   - js/config_diff.js   # from pages/
+  - js/figure_explorer.js   # from pages/

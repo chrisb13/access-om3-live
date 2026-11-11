@@ -10,6 +10,10 @@ the link to the page you were looking at and, for a run, the experiment's name. 
 number that looks wrong or is confusing, a missing figure, a failing notebook, a layout that doesn't
 work, or an idea for something that would help.
 
+For the [Figure explorer](figure-explorer.md), the most useful report has the figure's link (its **Copy
+link** button keeps the runs and options you chose) and the **Summary** from **Use this figure**, which
+lists the runs, the figure and where its data came from.
+
 ## Contributing changes
 
 Everything that builds this site is in [{repo}](https://github.com/{repo}). The main ways to contribute:
