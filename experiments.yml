@@ -58,7 +58,7 @@ experiments:
   - archive: /g/data/zv30/non-cmip/ACCESS-CM3/cm3-run-27-07-2026-PI-control/cm3-datastore/cm3-datastore.json
     description: CM3 pre-industrial control run. This run uses the GC5-central UM configuration, CMIP6 inputs, and includes several polar and tripolar bugfixes.
   - /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test4-d28e0359
-  - archive: /g/data/x77/kc5856/outputs/access-om3/OM3_25km_iaf_cycle2_control
+  - archive: /g/data/x77/kc5856/outputs/access-om3/OM3_MC_25km_jra_iaf_cycle2_control-expt-74114deb
     run_dir: /scratch/x77/kc5856/access-om3/archive/OM3_MC_25km_jra_iaf_cycle2_control-expt-74114deb
     description: 25km jra_iaf-test4 cycle 2
     notebooks: [ocean_stats, timeseries, Timeseries_daily_extreme_from_2D_fields, temp-salt-vs-depth-time, SeaIce_area, MLD]
