@@ -20,6 +20,9 @@
 #     description: One line on what this run is testing
 #     issue: https://github.com/ACCESS-NRI/access-om3-configs/issues/1755
 experiments:
+  - archive: /g/data/ol01/outputs/access-om3-25km/MC_25km_jra_iaf+wombatlite-test5.1-HYCOM1-86e0d96f
+    run_dir: /g/data/tm70/ds0092/model/experiments/MC_25km_jra_iaf+wombatlite-test5.1-HYCOM1-86e0d96f
+    description: This is the same as MC_25km_jra_iaf+wombatlite-test5.1 apart from switching to hycom1_75_800m.
   - archive: /g/data/ol01/outputs/access-om3-8km/MC_8km_jra_ryf-test2-expt-c349f800
     run_dir: /g/data/tm70/cyb561/access-om3-runs/8k/MC_8km_jra_ryf-test2
     description: 8km jra_ryf-test2
