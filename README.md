@@ -24,6 +24,7 @@ the folder's project is added to the PBS storage flags automatically.
 | `gadi/run_status.py` | On the login node: snapshot each run's payu records (job history, latest log tails) for its status page |
 | `scripts/build_site.py` | Lays out the pages and menu; the theme files come from access-om3-paper-1 |
 | `scripts/config_diff_data.py`, `pages/config_diff.*`, `pages/config-diff.md` | The **Config Diff** page: compares any two experiments of the Experiments table (the MOM6 parameters that differ, and how each one's settings changed during its runs); the data is read from `access-om3-experiments` at build time |
+| `pages/experiment_filter.js` | The **Filters** bar above the Experiments tables (OM3 Monitor and Evaluation Summary): buttons for components, resolution and forcing (JRA-IAF, JRA-RYF, ERA5), read from each experiment's name |
 | `mkdocs.yml` | Website settings, copied from access-om3-paper-1 |
 
 A run is skipped when it has no new `.nc` files since its last run and the notebooks have not

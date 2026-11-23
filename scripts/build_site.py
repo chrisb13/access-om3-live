@@ -1447,6 +1447,7 @@ def main(summary_md: str) -> None:
     shutil.copy2(ROOT / "pages" / "config_diff.css", docs / "css")
     (docs / "js").mkdir(exist_ok=True)
     shutil.copy2(ROOT / "pages" / "config_diff.js", docs / "js")
+    shutil.copy2(ROOT / "pages" / "experiment_filter.js", docs / "js")
     shutil.copy2(ROOT / "pages" / "config-diff.md", docs)
     write_config_diff_data(summary_md, docs / "assets" / "config_diff")
 
