@@ -20,10 +20,22 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: Restore cached figure-explorer bundles (the last good copy of each run's data)
+        uses: actions/cache@v4
+        with:
+          path: .cache/figure-data
+          key: figure-data-${{ github.run_id }}
+          restore-keys: figure-data-
+
       - name: Build the site without notebook output
         env:
           SITE_URL: http://localhost:8000/
         run: bash scripts/build_preview.sh
+
+      - name: Test the figure explorer's data code
+        run: |
+          pip install -q pytest responses
+          PYTHONPATH=theme/external/access-model-mkfigs/src python -m pytest -q tests || [ $? -eq 5 ]  # 5: skipped until paper-1's mkfigs has the explorer code
 
       - uses: actions/upload-artifact@v7
         with:

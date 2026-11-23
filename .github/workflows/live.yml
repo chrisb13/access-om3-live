@@ -37,6 +37,12 @@ jobs:
           python-version: '3.12'
 
       - run: pip install -r requirements.txt
+      - name: Restore cached figure-explorer bundles (the last good copy of each run's data)
+        uses: actions/cache@v4
+        with:
+          path: .cache/figure-data
+          key: figure-data-${{ github.run_id }}
+          restore-keys: figure-data-
 
       # Copied from ACCESS-NRI/COSIMA-recipes-workflow (cosima-all-recipes.yml).
       - name: Configure SSH for Gadi
@@ -128,6 +134,14 @@ jobs:
           # Theme files from access-om3-paper-1, so the look stays in step with the paper site.
           git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ACCESS-Community-Hub/access-om3-paper-1.git theme
           git -C theme sparse-checkout set documentation/overrides documentation/docs/assets documentation/docs/css documentation/docs/fontello
+          # Figure explorer: the paper's categories, and mkfigs at the commit paper-1 pins. (Cone-mode sparse
+          # checkout takes directories only; documentation/figure-data.json comes with documentation/overrides.)
+          mkdir -p theme/notebooks && git -C theme show HEAD:notebooks/mkfigs_issues.py > theme/notebooks/mkfigs_issues.py
+          MKFIGS_SHA=$(git -C theme ls-tree HEAD external/access-model-mkfigs | awk '{print $3}')
+          MKFIGS_URL=$(git config -f theme/.gitmodules submodule.external/access-model-mkfigs.url)
+          git init -q theme/external/access-model-mkfigs
+          git -C theme/external/access-model-mkfigs fetch -q --depth 1 "$MKFIGS_URL" "$MKFIGS_SHA"
+          git -C theme/external/access-model-mkfigs checkout -q FETCH_HEAD
           python3 scripts/build_site.py Experiments.md   # also writes the run summary table
           echo "::group::Build the website (mkdocs)"
           mkdocs build -f build/mkdocs.yml -d site
